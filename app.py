@@ -92,28 +92,35 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json (ĐA PHƯƠNG THỨC)
+# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json VỚI LOG DEBUG
 # -------------------------------------------------------------
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def load_all_json_files():
     points = {}
+    logs = []
 
-    # Phương pháp 1: Duyệt qua Pathlib ở tất cả các thư mục gốc và thư mục con
-    root_paths = [Path("."), Path(__file__).parent]
-    json_files = []
+    # Danh sách thư mục tìm kiếm
+    current_file_dir = Path(__file__).resolve().parent
+    cwd_dir = Path.cwd()
+    search_dirs = list(set([current_file_dir, cwd_dir]))
 
-    for r_path in root_paths:
-        json_files.extend(list(r_path.rglob("*.json")))
-        json_files.extend(list(r_path.rglob("*.Json")))
+    logs.append(f"📁 Thư mục đang đứng: {cwd_dir}")
+    logs.append(f"📁 Thư mục file app: {current_file_dir}")
 
-    # Loại bỏ file trùng
-    json_files = list(set(json_files))
+    found_files = []
+    for base_path in search_dirs:
+        # Tìm file không phân biệt hoa thường
+        for ext in ["*.json", "*.Json", "*.JSON"]:
+            found_files.extend(list(base_path.rglob(ext)))
 
-    for file_path in json_files:
+    found_files = list(set(found_files))
+    logs.append(f"🔍 Tìm thấy tổng số file .json: {len(found_files)}")
+
+    for file_path in found_files:
         try:
-            filename = file_path.name
             point_name = file_path.stem.upper().strip()
 
+            # Lọc các file dạng TQGP...
             if "TQGP" not in point_name:
                 continue
 
@@ -122,7 +129,7 @@ def load_all_json_files():
 
             lat, lon = None, None
 
-            # TH 1: GeoJSON
+            # GeoJSON (FeatureCollection / Feature)
             if isinstance(data, dict):
                 features = data.get("features", [])
                 if not features and data.get("type") == "Feature":
@@ -143,50 +150,51 @@ def load_all_json_files():
                         or data.get("longitude")
                     )
 
-            # TH 2: List [lon, lat] hoặc [lat, lon]
+            # Mảng [lon, lat] hoặc [lat, lon]
             elif isinstance(data, list) and len(data) >= 2:
                 lon, lat = data[0], data[1]
 
             if lat is not None and lon is not None:
                 points[point_name] = {"lat": float(lat), "lon": float(lon)}
 
-        except Exception:
-            continue
+        except Exception as e:
+            logs.append(f"❌ Lỗi đọc file {file_path.name}: {str(e)}")
 
-    # Phương pháp 2: Dự phòng quét GitHub API nếu trên Streamlit Cloud không thấy file local
+    # Nếu vẫn chưa tìm thấy, gọi thử qua GitHub API công khai
     if not points:
         try:
             github_url = (
                 "https://api.github.com/repos/bangnc13/ThuBill/contents/"
             )
-            res = requests.get(github_url, timeout=5).json()
-            if isinstance(res, list):
-                for item in res:
+            headers = {"User-Agent": "StreamlitApp"}
+            res = requests.get(github_url, headers=headers, timeout=5)
+            logs.append(f"🌐 GitHub API HTTP Status: {res.status_code}")
+
+            if res.status_code == 200:
+                items = res.json()
+                for item in items:
                     name = item.get("name", "")
-                    point_name = os.path.splitext(name)[0].upper()
-                    if "TQGP" in point_name and (
-                        name.endswith(".json") or name.endswith(".Json")
-                    ):
-                        download_url = item.get("download_url")
-                        if download_url:
-                            file_res = requests.get(
-                                download_url, timeout=3
+                    point_name = os.path.splitext(name)[0].upper().strip()
+                    if "TQGP" in point_name and name.lower().endswith(".json"):
+                        raw_url = item.get("download_url")
+                        if raw_url:
+                            f_data = requests.get(
+                                raw_url, headers=headers, timeout=3
                             ).json()
-                            # Đọc tọa độ từ GeoJSON GitHub
-                            features = file_res.get("features", [])
+                            features = f_data.get("features", [])
                             if features:
                                 coords = features[0]["geometry"]["coordinates"]
                                 points[point_name] = {
                                     "lat": float(coords[1]),
                                     "lon": float(coords[0]),
                                 }
-        except Exception:
-            pass
+        except Exception as ex:
+            logs.append(f"❌ Lỗi GitHub API: {str(ex)}")
 
-    return points
+    return points, logs
 
 
-all_points = load_all_json_files()
+all_points, debug_logs = load_all_json_files()
 unique_keys = sorted(list(all_points.keys()))
 
 # -------------------------------------------------------------
@@ -198,6 +206,9 @@ if len(unique_keys) > 0:
     st.sidebar.success(f"📂 Đã tải thành công {len(unique_keys)} điểm TQGP.")
 else:
     st.sidebar.error("⚠️ Chưa tìm thấy file TQGPxxx.json nào trong thư mục!")
+    with st.sidebar.expander("🔍 Lịch sử kiểm tra (Debug Log)"):
+        for log in debug_logs:
+            st.write(log)
 
 api_key_input = st.sidebar.text_input(
     "🔑 Google API Key (Tùy chọn)", type="password"
