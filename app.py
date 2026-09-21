@@ -1,413 +1,176 @@
-import json
-import math
-import os
-from concurrent.futures import ThreadPoolExecutor
-import folium
-from folium.plugins import LocateControl
-import pandas as pd
-import requests
-import streamlit as st
-import streamlit.components.v1 as components
-from streamlit_folium import st_folium
-
-# -------------------------------------------------------------
-# CẤU HÌNH TRANG STREAMLIT
-# -------------------------------------------------------------
-st.set_page_config(
-    page_title="Tối ưu đường di chuyển xe máy - Tuyên Quang",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# -------------------------------------------------------------
-# 1. LOGO & CSS HIỆU ỨNG (Giữ nguyên giao diện của bạn)
-# -------------------------------------------------------------
-logo_path = "FPT_Telecom_logo.png"
-if os.path.exists(logo_path):
-    st.sidebar.image(logo_path, use_container_width=True)
-
-st.markdown(
-    """
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hiển thị Hạ tầng Mạng GeoJSON</title>
+    
+    <!-- Thư viện Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
     <style>
-    html, body, [data-testid="stAppViewContainer"], .main, .block-container {
-        padding: 0 !important; 
-        margin: 0 !important; 
-        height: 100vh !important; 
-        overflow: hidden !important;
-    }
-    [data-testid="stVerticalBlock"] { gap: 0rem !important; }
-    header[data-testid="stHeader"] { 
-        height: 0px !important; 
-        background: transparent !important; 
-        z-index: 99999 !important; 
-    }
-    @keyframes neonBlinkGlow {
-        0% { background-color: #00ffcc !important; box-shadow: 0 0 10px #00ffcc; border: 2px solid #00ffcc; transform: scale(1); }
-        50% { background-color: #00b386 !important; box-shadow: 0 0 25px #00ffcc, 0 0 45px #00ffcc; border: 2px solid #ffffff; transform: scale(1.15); }
-        100% { background-color: #00ffcc !important; box-shadow: 0 0 10px #00ffcc; border: 2px solid #00ffcc; transform: scale(1); }
-    }
-    [data-testid="collapsedControl"], 
-    [data-testid="stSidebarCollapsedControl"], 
-    button[aria-label="Open sidebar"], 
-    button[aria-label="Close sidebar"] {
-        position: fixed !important; top: 14px !important; left: 14px !important; z-index: 99999999 !important;
-        background-color: #00ffcc !important; border-radius: 50% !important; width: 44px !important; height: 44px !important;
-        display: flex !important; align-items: center !important; justify-content: center !important;
-        animation: neonBlinkGlow 1.2s infinite ease-in-out !important;
-    }
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        .info-legend {
+            background: white;
+            padding: 10px;
+            line-height: 1.5;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        .legend-item {
+            margin-bottom: 3px;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 5px;
+            border-radius: 50%;
+        }
     </style>
-    """,
-    unsafe_allow_html=True,
-)
+</head>
+<body>
 
-# -------------------------------------------------------------
-# 2. GPS REALTIME
-# -------------------------------------------------------------
-if "user_gps" not in st.session_state:
-    st.session_state.user_gps = {"lat": 21.82714, "lon": 105.19952}
-    gps_code = """
-    <script>
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                window.parent.postMessage({
-                    type: "streamlit:setComponentValue",
-                    value: {lat: pos.coords.latitude, lon: pos.coords.longitude}
-                }, "*");
-            },
-            (err) => console.error("Lỗi GPS:", err),
-            { enableHighAccuracy: true }
-        );
+<div id="map"></div>
+
+<!-- Thư viện Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    // 1. Dữ liệu GeoJSON cung cấp
+    const geojsonData = {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[105.207314,21.818127]},"properties":{"id":6839682,"name":"TQGM001.0021/HO","latLng":"(21.81812691151417,105.20731374621391)","objectType":3,"totalPort":48,"portFree":48,"portUsed":0,"spliter":0,"hasTapdiem":1,"cabType":2}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.205674,21.818614]},"properties":{"id":6839702,"name":"TQGM001.0023/HO","latLng":"(21.818613720895037,105.20567424595356)","objectType":3,"totalPort":12,"portFree":12,"portUsed":0,"spliter":0,"hasTapdiem":1,"cabType":2}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.208171,21.81768]},"properties":{"id":21796122,"name":"TQGM001.0025/MO","latLng":"(21.817680434824318,105.208170793655)","objectType":4,"totalPort":24,"portFree":24,"portUsed":0,"spliter":1,"hasTapdiem":1,"cabType":2}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.208502,21.816681]},"properties":{"id":6839672,"name":"TQGM001.0001/FO","latLng":"(21.81668079152923,105.20850196480751)","objectType":1,"totalPort":24,"portFree":24,"portUsed":0,"spliter":1,"hasTapdiem":1,"cabType":2}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.208383,21.817538]},"properties":{"id":21796112,"name":"TQGM001.0024/MO","latLng":"(21.81753849987688,105.20838268816718)","objectType":4,"totalPort":24,"portFree":24,"portUsed":0,"spliter":1,"hasTapdiem":1,"cabType":2}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.206228,21.818712]},"properties":{"id":6839692,"name":"TQGM001.0022/HO","latLng":"(21.818711767341103,105.20622778683901)","objectType":3,"totalPort":12,"portFree":12,"portUsed":0,"spliter":0,"hasTapdiem":1,"cabType":2}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.208369,21.816711]},"properties":{"id":16912,"name":"TQGM001","latLng":"(21.816711295287163,105.20836919546127)","objectType":5,"totalPort":144,"portFree":144,"portUsed":0,"spliter":3,"hasTapdiem":0,"cabType":2}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.208173,21.81769]},"properties":{"id":7267472,"name":"TQGM001.0021/CO","hasCable":1,"capacity":48,"length":null,"color":"#06168F","latlngCable":"(21.81769021269109, 105.20817339720462);(21.81812691151417, 105.20731374621391)","method":"Treo","headId":6839672,"headPoint":"TQGM001.0001/FO","headType":1,"tailId":6839682,"tailPoint":"TQGM001.0021/HO","tailType":3,"tailHeadLatLng":"(21.81668079152923,105.20850196480751);(21.81812691151417,105.20731374621391)","midObject":null}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.207314,21.818127]},"properties":{"id":7788902,"name":"TQGM001.0022/CO","hasCable":1,"capacity":12,"length":null,"color":"#0B9753","latlngCable":null,"method":"Treo","headId":6839682,"headPoint":"TQGM001.0021/HO","headType":3,"tailId":6839692,"tailPoint":"TQGM001.0022/HO","tailType":3,"tailHeadLatLng":"(21.81812691151417,105.20731374621391);(21.818711767341103,105.20622778683901)","midObject":null}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.206228,21.818712]},"properties":{"id":7788912,"name":"TQGM001.0023/CO","hasCable":1,"capacity":12,"length":null,"color":"#0B9753","latlngCable":"(21.818711767341103,105.20622778683901);(21.81881961857068,105.20603684701065);(21.818900934711706,105.2087432183086);(21.818633641448244,105.20568497478962)","method":"Treo","headId":6839692,"headPoint":"TQGM001.0022/HO","headType":3,"tailId":6839702,"tailPoint":"TQGM001.0023/HO","tailType":3,"tailHeadLatLng":"(21.818711767341103,105.20622778683901);(21.818613720895037,105.20567424595356)","midObject":null}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.208502,21.816681]},"properties":{"id":11095652,"name":"TQGM001.0024/CO","hasCable":1,"capacity":48,"length":null,"color":"#06168F","latlngCable":"(21.81668079152923, 105.20850196480751);(21.8186063594783, 105.20861667025201);(21.81712984530659, 105.20810003034339);(21.81753849987688, 105.20838268816718)","method":"Treo","headId":6839672,"headPoint":"TQGM001.0001/FO","headType":1,"tailId":21796112,"tailPoint":"TQGM001.0024/MO","tailType":4,"tailHeadLatLng":"(21.81668079152923,105.20850196480751);(21.81753849987688,105.20838268816718)","midObject":null}},{"type":"Feature","geometry":{"type":"Point","coordinates":[105.208383,21.817538]},"properties":{"id":11095662,"name":"TQGM001.0025/CO","hasCable":1,"capacity":48,"length":null,"color":"#06168F","latlngCable":null,"method":"Treo","headId":21796112,"headPoint":"TQGM001.0024/MO","headType":4,"tailId":21796122,"tailPoint":"TQGM001.0025/MO","tailType":4,"tailHeadLatLng":"(21.81753849987688,105.20838268816718);(21.817680434824318,105.208170793655)","midObject":null}}]};
+
+    // 2. Khởi tạo bản đồ tại vị trí mặc định
+    const map = L.map('map').setView([21.817, 105.207], 16);
+
+    // 3. Thêm lớp bản đồ nền OpenStreetMap
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Hàm chuyển đổi chuỗi "(lat1, lng1);(lat2, lng2)" thành mảng [[lat1, lng1], [lat2, lng2]]
+    function parseLatLngString(str) {
+        if (!str) return [];
+        return str.split(';').map(item => {
+            const cleanStr = item.replace('(', '').replace(')', '').trim();
+            const parts = cleanStr.split(',');
+            if (parts.length === 2) {
+                return [parseFloat(parts[0]), parseFloat(parts[1])];
+            }
+            return null;
+        }).filter(item => item !== null);
     }
-    </script>
-    """
-    gps_data = components.html(gps_code, height=0)
-    if gps_data and isinstance(gps_data, dict) and "lat" in gps_data:
-        st.session_state.user_gps = gps_data
 
-curr_lat = st.session_state.user_gps["lat"]
-curr_lon = st.session_state.user_gps["lon"]
+    // Hàm lấy màu sắc theo loại thiết bị (objectType)
+    function getPointColor(objectType) {
+        switch (objectType) {
+            case 1: return '#e74c3c'; // FO - Đỏ
+            case 3: return '#3498db'; // HO - Xanh dương
+            case 4: return '#f39c12'; // MO - Cam
+            case 5: return '#9b59b6'; // Tủ cáp chính - Tím
+            default: return '#2ecc71';
+        }
+    }
 
+    const featureGroup = L.featureGroup();
 
-# -------------------------------------------------------------
-# 3. LOAD DATA GEOJSON
-# -------------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def load_geojson(file_path):
-    if not os.path.exists(file_path):
-        return {}
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    // 4. Duyệt qua danh sách đối tượng
+    geojsonData.features.forEach(feature => {
+        const props = feature.properties;
 
-    points = {}
-    for feature in data.get("features", []):
-        if feature.get("geometry", {}).get("type") == "Point":
-            coords = feature["geometry"]["coordinates"]
-            for val in feature.get("properties", {}).values():
-                val_str = str(val).strip()
-                if "TQGP0" in val_str.upper():
-                    points[val_str] = {"lat": coords[1], "lon": coords[0]}
-    return points
+        // XỬ LÝ ĐƯỜNG CÁP (Nếu có chứa thông tin cáp)
+        if (props.hasCable === 1) {
+            const cableCoords = parseLatLngString(props.latlngCable) || parseLatLngString(props.tailHeadLatLng);
+            
+            if (cableCoords && cableCoords.length > 0) {
+                const polyline = L.polyline(cableCoords, {
+                    color: props.color || '#0000FF',
+                    weight: 4,
+                    opacity: 0.8
+                });
 
-
-all_points = load_geojson("data.geojson")
-unique_keys = sorted(list(all_points.keys()))
-
-# -------------------------------------------------------------
-# 4. SIDEBAR & ĐỊA ĐIỂM
-# -------------------------------------------------------------
-st.sidebar.header("Make by BangNC13")
-api_key_input = st.sidebar.text_input(
-    "🔑 Google API Key (Tùy chọn)", type="password"
-)
-
-search_query = st.sidebar.text_input(
-    "Nhập điểm cuối hành trình (nếu muốn)", placeholder="Chợ Tam Cờ..."
-)
-end_location = None
-
-if search_query:
-    try:
-        url = f"https://nominatim.openstreetmap.org/search?q={search_query}, Tuyên Quang, Việt Nam&format=json&limit=3"
-        res = requests.get(
-            url, headers={"User-Agent": "TQ_App"}, timeout=3
-        ).json()
-        if res:
-            end_location = {
-                "name": f"ĐÍCH ĐẾN: {search_query}",
-                "lat": float(res[0]["lat"]),
-                "lon": float(res[0]["lon"]),
+                // Nội dung thông tin Cáp khi click
+                const cablePopup = `
+                    <b>CÁP QUANG: ${props.name}</b><br/>
+                    <b>ID:</b> ${props.id}<br/>
+                    <b>Dung lượng:</b> ${props.capacity || 'N/A'} sợi<br/>
+                    <b>Cách thức:</b> ${props.method || 'N/A'}<br/>
+                    <b>Từ:</b> ${props.headPoint} (Loại ${props.headType})<br/>
+                    <b>Đến:</b> ${props.tailPoint} (Loại ${props.tailType})
+                `;
+                
+                polyline.bindPopup(cablePopup);
+                polyline.bindTooltip(props.name, { sticky: true });
+                polyline.addTo(featureGroup);
             }
-            st.sidebar.success(f"📍 Đã chọn đích: {search_query}")
-        else:
-            st.sidebar.error("Không tìm thấy địa điểm này ở Tuyên Quang!")
-    except Exception as e:
-        st.sidebar.error(f"Lỗi tìm kiếm: {e}")
+        } 
+        
+        // XỬ LÝ ĐIỂM / THIẾT BỊ
+        if (feature.geometry && feature.geometry.type === "Point") {
+            const coords = feature.geometry.coordinates; // [lng, lat]
+            const latLng = [coords[1], coords[0]];
 
-st.sidebar.header("📋 Chọn lộ trình di chuyển")
-selected_from_list = st.sidebar.multiselect(
-    "Chọn điểm TQGP0xx:", options=unique_keys
-)
-uploaded_file = st.sidebar.file_uploader(
-    "Hoặc Upload file Excel:", type=["xlsx", "xls"]
-)
+            const marker = L.circleMarker(latLng, {
+                radius: 7,
+                fillColor: getPointColor(props.objectType),
+                color: "#ffffff",
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.9
+            });
 
-excel_points = []
-if uploaded_file:
-    try:
-        df = pd.read_excel(uploaded_file, header=None).astype(str)
-        flat_series = df.values.flatten()
-        matched = [
-            val.strip()
-            for val in flat_series
-            if "TQGP0" in val.upper() and val.strip() in all_points
-        ]
-        excel_points.extend(matched)
-        st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm từ Excel.")
-    except Exception as e:
-        st.sidebar.error(f"Lỗi đọc file Excel: {e}")
+            // Nội dung thông tin Điểm khi click
+            const pointPopup = `
+                <b>THIẾT BỊ: ${props.name}</b><br/>
+                <b>ID:</b> ${props.id}<br/>
+                <b>Tổng số cổng:</b> ${props.totalPort ?? 'N/A'}<br/>
+                <b>Cổng rảnh:</b> <span style="color:green;font-weight:bold">${props.portFree ?? 'N/A'}</span><br/>
+                <b>Cổng đã dùng:</b> <span style="color:red;font-weight:bold">${props.portUsed ?? 'N/A'}</span><br/>
+                <b>Bộ chia (Spliter):</b> ${props.spliter ?? 'N/A'}
+            `;
 
-final_selected_names = list(set(selected_from_list + excel_points))
+            marker.bindPopup(pointPopup);
+            marker.bindTooltip(props.name, { permanent: false, direction: 'top' });
+            marker.addTo(featureGroup);
+        }
+    });
 
-st.sidebar.markdown("---")
-show_labels = st.sidebar.checkbox("🏷️ Hiện tên điểm (Label)", value=True)
-show_route_line = st.sidebar.checkbox("🛣️ Hiện đường vẽ lộ trình", value=True)
+    // Thêm tất cả đối tượng vào bản đồ
+    featureGroup.addTo(map);
 
-if st.sidebar.button("🔄 Làm mới bản đồ"):
-    st.session_state.calculated_route = None
-    st.session_state.route_cache = None
-    st.rerun()
+    // Tự động căn chỉnh bản đồ vừa vặn với toàn bộ dữ liệu
+    if (featureGroup.getLayers().length > 0) {
+        map.fitBounds(featureGroup.getBounds(), { padding: [30, 30] });
+    }
 
+    // 5. Thêm Chú thích (Legend) vào góc bản đồ
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function () {
+        const div = L.DomUtil.create('div', 'info-legend');
+        div.innerHTML = `
+            <b>Chú giải:</b><br/>
+            <div class="legend-item"><span class="legend-color" style="background:#e74c3c;"></span>Loại 1 (FO)</div>
+            <div class="legend-item"><span class="legend-color" style="background:#3498db;"></span>Loại 3 (HO)</div>
+            <div class="legend-item"><span class="legend-color" style="background:#f39c12;"></span>Loại 4 (MO)</div>
+            <div class="legend-item"><span class="legend-color" style="background:#9b59b6;"></span>Loại 5 (Tủ)</div>
+            <div class="legend-item"><span class="legend-color" style="background:#06168F; height:3px; border-radius:0;"></span>Cáp 48FO</div>
+            <div class="legend-item"><span class="legend-color" style="background:#0B9753; height:3px; border-radius:0;"></span>Cáp 12FO</div>
+        `;
+        return div;
+    };
+    legend.addTo(map);
+</script>
 
-# -------------------------------------------------------------
-# 5. THUẬT TOÁN BÁM ĐƯỜNG XE MÁY CHUẨN GOOGLE / OSRM SMART
-# -------------------------------------------------------------
-def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def fetch_smart_segment(pair):
-    """
-    Tự động ép bám đường giao thông.
-    Nếu dùng OSRM, bỏ tham số cắt thẳng và tăng snapping radius lên 2500m
-    để không bao giờ đâm ngang sông/núi.
-    """
-    p1, p2 = pair
-    url = (
-        f"http://router.project-osrm.org/route/v1/driving/"
-        f"{p1[1]},{p1[0]};{p2[1]},{p2[0]}"
-        f"?overview=full&geometries=geojson&radiuses=2500;2500"
-    )
-
-    try:
-        res = requests.get(url, timeout=4).json()
-        if res.get("code") == "Ok":
-            route_data = res["routes"][0]
-            osrm_dist = route_data["distance"] / 1000.0
-            geom = [
-                [lat, lon]
-                for lon, lat in route_data["geometry"]["coordinates"]
-            ]
-            return geom, osrm_dist
-    except Exception:
-        pass
-
-    # Trường hợp đứt mạng tuyệt đối mới dùng đường thẳng
-    direct_dist = haversine_distance(p1[0], p1[1], p2[0], p2[1])
-    return [[p1[0], p1[1]], [p2[0], p2[1]]], direct_dist
-
-
-def solve_tsp_google_style(start_coord, points, end_coord=None):
-    all_coords = [start_coord] + [(p["lat"], p["lon"]) for p in points]
-    if end_coord:
-        all_coords.append((end_coord["lat"], end_coord["lon"]))
-
-    n = len(all_coords)
-    dist_matrix = [[0] * n for _ in range(n)]
-    for i in range(n):
-        for j in range(n):
-            dist_matrix[i][j] = haversine_distance(
-                all_coords[i][0],
-                all_coords[i][1],
-                all_coords[j][0],
-                all_coords[j][1],
-            )
-
-    unvisited = set(range(1, len(points) + 1))
-    curr = 0
-    path = [0]
-    while unvisited:
-        nxt = min(unvisited, key=lambda x: dist_matrix[curr][x])
-        path.append(nxt)
-        unvisited.remove(nxt)
-        curr = nxt
-
-    if end_coord:
-        path.append(n - 1)
-
-    ordered_points = []
-    for idx in path[1:]:
-        if end_coord and idx == n - 1:
-            ordered_points.append(end_coord)
-        else:
-            ordered_points.append(points[idx - 1])
-
-    return ordered_points
-
-
-def get_accurate_route_geometry_parallel(coords_list):
-    pairs = [
-        (coords_list[i], coords_list[i + 1])
-        for i in range(len(coords_list) - 1)
-    ]
-    road_lines = []
-    total_dist = 0.0
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        results = list(executor.map(fetch_smart_segment, pairs))
-
-    for geom, dist in results:
-        road_lines.append(geom)
-        total_dist += dist
-
-    return road_lines, total_dist
-
-
-# -------------------------------------------------------------
-# 6. TÍNH TOÁN & DỰNG BẢN ĐỒ
-# -------------------------------------------------------------
-if "calculated_route" not in st.session_state:
-    st.session_state.calculated_route = None
-if "route_cache" not in st.session_state:
-    st.session_state.route_cache = None
-
-if st.sidebar.button("🚀 Lộ trình"):
-    if not final_selected_names and not end_location:
-        st.sidebar.warning(
-            "Vui lòng chọn điểm TQGP0xx hoặc nhập Điểm Kết Thúc!"
-        )
-    else:
-        with st.spinner("Đang tối ưu bám đường xe máy..."):
-            gps_start = (curr_lat, curr_lon)
-            pts = [
-                {
-                    "name": name,
-                    "lat": all_points[name]["lat"],
-                    "lon": all_points[name]["lon"],
-                }
-                for name in final_selected_names
-            ]
-
-            opt_route = solve_tsp_google_style(gps_start, pts, end_location)
-            stop_coords = [gps_start] + [
-                (p["lat"], p["lon"]) for p in opt_route
-            ]
-
-            road_lines, real_dist = get_accurate_route_geometry_parallel(
-                stop_coords
-            )
-
-            st.session_state.calculated_route = opt_route
-            st.session_state.start_coords = gps_start
-            st.session_state.route_cache = {
-                "road_lines": road_lines,
-                "real_dist": real_dist,
-                "stop_coords": stop_coords,
-            }
-
-
-def build_map(center):
-    m = folium.Map(
-        location=center,
-        zoom_start=14,
-        tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
-        attr="Google Maps",
-    )
-    LocateControl(
-        auto_start=False, flyTo=True, strings={"title": "Vị trí của tôi"}
-    ).add_to(m)
-    return m
-
-
-# KHU VỰC RENDER MAIN VIEW (ĐẢM BẢO KHÔNG BỊ ĐEN MÀN HÌNH)
-if st.session_state.calculated_route and st.session_state.route_cache:
-    route = st.session_state.calculated_route
-    s_lat, s_lon = st.session_state.start_coords
-
-    cache = st.session_state.route_cache
-    road_lines = cache["road_lines"]
-    real_dist = cache["real_dist"]
-    stop_coords = cache["stop_coords"]
-
-    st.sidebar.success(
-        f"📊 Tổng quãng đường xe máy: **~ {real_dist:.2f} km**"
-    )
-
-    m = build_map([s_lat, s_lon])
-    folium.Marker(
-        [s_lat, s_lon],
-        popup="Xuất phát",
-        icon=folium.Icon(color="green", icon="user", prefix="fa"),
-    ).add_to(m)
-
-    num_pts = len(route)
-    for idx, pt in enumerate(route, start=1):
-        is_end = idx == num_pts and end_location is not None
-        bg_color = "#e63946" if is_end else "#1A73E8"
-
-        label_html = ""
-        if show_labels:
-            label_html = f"""
-            <span style="margin-left: 6px; background: rgba(255, 255, 255, 0.95); color: #1f2937; font-weight: 700; 
-            font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid #d1d5db; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.15); pointer-events: none; white-space: nowrap;">
-                {pt['name']}
-            </span>
-            """
-
-        marker_html = f"""
-        <div style="display: flex; flex-direction: row; align-items: center; justify-content: center;">
-            <div style="font-size: 10pt; font-weight: bold; color: white; background-color: {bg_color}; 
-            border: 2px solid #ffffff; border-radius: 50%; width: 26px; height: 26px; text-align: center; 
-            line-height: 22px; box-shadow: 0 2px 5px rgba(0,0,0,0.3); flex-shrink: 0;">
-                {idx}
-            </div>
-            {label_html}
-        </div>
-        """
-
-        folium.Marker(
-            [pt["lat"], pt["lon"]],
-            popup=f"{idx}. {pt['name']}",
-            icon=folium.DivIcon(
-                html=marker_html, icon_size=(150, 40), icon_anchor=(13, 13)
-            ),
-        ).add_to(m)
-
-    if show_route_line:
-        for line in road_lines:
-            folium.PolyLine(
-                line, color="#1A73E8", weight=5, opacity=0.85
-            ).add_to(m)
-
-    m.fit_bounds(stop_coords)
-    st_folium(m, use_container_width=True, height=1000, key="optimized_map")
-else:
-    m_default = build_map([curr_lat, curr_lon])
-    folium.Marker(
-        [curr_lat, curr_lon],
-        popup="Vị trí hiện tại",
-        icon=folium.Icon(color="green", icon="user", prefix="fa"),
-    ).add_to(m_default)
-    st_folium(
-        m_default, use_container_width=True, height=1000, key="default_map"
-    )
+</body>
+</html>
