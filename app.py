@@ -1,8 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor
 import glob
 import json
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor
 import folium
 from folium.plugins import LocateControl
 import pandas as pd
@@ -91,42 +91,58 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD TOÀN BỘ CÁC FILE JSON (QUÉT SÂU & MỞ RỘNG MẪU LỌC TQGP)
+# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_all_json_files():
     points = {}
     # Quét tất cả file .json ở thư mục hiện tại và các thư mục con
-    json_files = glob.glob("**/*.json", recursive=True)
+    json_files = glob.glob("**/*.json", recursive=True) + glob.glob(
+        "**/*.Json", recursive=True
+    )
 
     for file_path in json_files:
         try:
+            filename = os.path.basename(file_path)
+            point_name = os.path.splitext(filename)[0].upper()
+
+            # Lọc các file dạng TQGP...
+            if not point_name.startswith("TQGP"):
+                continue
+
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            # Trường hợp 1: Chuẩn GeoJSON FeatureCollection
-            features = []
+            lat, lon = None, None
+
+            # Trường hợp 1: GeoJSON chuẩn (FeatureCollection hoặc Feature)
             if isinstance(data, dict):
-                if "features" in data:
-                    features = data["features"]
-                elif data.get("type") == "Feature":
+                features = data.get("features", [])
+                if not features and data.get("type") == "Feature":
                     features = [data]
 
-            for feature in features:
-                geom = feature.get("geometry", {})
-                props = feature.get("properties", {})
+                for feature in features:
+                    geom = feature.get("geometry", {})
+                    if geom.get("type") == "Point" and "coordinates" in geom:
+                        coords = geom["coordinates"]
+                        lon, lat = coords[0], coords[1]
+                        break
 
-                if geom.get("type") == "Point" and "coordinates" in geom:
-                    coords = geom["coordinates"]
-                    # Lấy latitude và longitude (GeoJSON thường lưu [lon, lat])
-                    lon, lat = coords[0], coords[1]
+                # Trường hợp 2: JSON dạng dict {"lat": ..., "lon": ...}
+                if lat is None:
+                    lat = data.get("lat") or data.get("latitude")
+                    lon = (
+                        data.get("lon")
+                        or data.get("lng")
+                        or data.get("longitude")
+                    )
 
-                    # Duyệt qua tất cả thuộc tính để tìm tên điểm chứa TQGP
-                    for val in props.values():
-                        val_str = str(val).strip()
-                        # Lọc bất kỳ điểm nào chứa cụm "TQGP" (không phân biệt hoa/thường, hỗ trợ TQGP, TQGP0, TQGP1,...)
-                        if "TQGP" in val_str.upper():
-                            points[val_str] = {"lat": lat, "lon": lon}
+            # Trường hợp 3: JSON dạng mảng tọa độ [lon, lat] hoặc [lat, lon]
+            elif isinstance(data, list) and len(data) >= 2:
+                lon, lat = data[0], data[1]
+
+            if lat is not None and lon is not None:
+                points[point_name] = {"lat": float(lat), "lon": float(lon)}
 
         except Exception:
             continue
@@ -142,13 +158,10 @@ unique_keys = sorted(list(all_points.keys()))
 # -------------------------------------------------------------
 st.sidebar.header("Make by BangNC13")
 
-# Hiển thị số lượng điểm quét được
 if len(unique_keys) > 0:
     st.sidebar.success(f"📂 Đã tải thành công {len(unique_keys)} điểm TQGP.")
 else:
-    st.sidebar.error(
-        "⚠️ Chưa tìm thấy điểm TQGP nào trong các file JSON! Lấy mẫu dữ liệu mặc định..."
-    )
+    st.sidebar.error("⚠️ Chưa tìm thấy file TQGPxxx.json nào trong thư mục!")
 
 api_key_input = st.sidebar.text_input(
     "🔑 Google API Key (Tùy chọn)", type="password"
@@ -191,9 +204,9 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, header=None).astype(str)
         flat_series = df.values.flatten()
         matched = [
-            val.strip()
+            val.strip().upper()
             for val in flat_series
-            if "TQGP" in val.upper() and val.strip() in all_points
+            if val.strip().upper() in all_points
         ]
         excel_points.extend(matched)
         st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm từ Excel.")
