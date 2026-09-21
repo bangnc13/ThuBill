@@ -90,14 +90,11 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD DATA TỪ FILE EXCEL (THAY THẾ GEOJSON)
+# 3. LOAD DATA TỪ FILE EXCEL GỐC
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_excel_data(file_path):
-    """
-    Đọc file Excel dữ liệu gốc. 
-    Yêu cầu file Excel chứa các cột: Tên (chứa mã TQGP0xx), Lat/Vĩ độ, Lon/Kinh độ.
-    """
+    """Đọc dữ liệu điểm tọa độ từ file Excel hệ thống."""
     if not os.path.exists(file_path):
         return {}
 
@@ -105,46 +102,76 @@ def load_excel_data(file_path):
         df = pd.read_excel(file_path)
         points = {}
 
-        # Chuẩn hóa tên cột để tránh lỗi viết hoa/thường
-        cols = {str(col).strip().lower(): col for col in df.columns}
+        # Chuẩn hóa tên cột
+        cols_map = {str(col).strip().lower(): col for col in df.columns}
 
-        # Xác định cột tên, lat, lon
-        name_col = next((cols[c] for c in cols if "name" in c or "tên" in c or "mã" in c or "point" in c), df.columns[0])
-        lat_col = next((cols[c] for c in cols if "lat" in c or "vĩ" in c), None)
-        lon_col = next((cols[c] for c in cols if "lon" in c or "lng" in c or "kinh" in c), None)
+        # Tìm cột tên/mã
+        name_col = None
+        for key in cols_map:
+            if any(k in key for k in ["mã", "ma", "tên", "ten", "name", "point", "id", "tqgp"]):
+                name_col = cols_map[key]
+                break
+        if not name_col:
+            name_col = df.columns[0]
 
+        # Tìm cột Latitude
+        lat_col = None
+        for key in cols_map:
+            if any(k in key for k in ["lat", "vĩ", "vi"]):
+                lat_col = cols_map[key]
+                break
+
+        # Tìm cột Longitude
+        lon_col = None
+        for key in cols_map:
+            if any(k in key for k in ["lon", "lng", "kinh"]):
+                lon_col = cols_map[key]
+                break
+
+        # Nếu không tìm thấy cột theo tên, dùng chỉ số cột mặc định 0, 1, 2
         if not lat_col or not lon_col:
-            # Trường hợp file không phân cột rõ ràng, lấy theo thứ tự cột 0, 1, 2
-            name_col, lat_col, lon_col = df.columns[0], df.columns[1], df.columns[2]
+            if len(df.columns) >= 3:
+                name_col, lat_col, lon_col = df.columns[0], df.columns[1], df.columns[2]
+            else:
+                return {}
 
         for _, row in df.iterrows():
-            name_val = str(row[name_col]).strip()
+            raw_name = str(row[name_col]).strip()
+            if not raw_name or raw_name.lower() in ["nan", "none", "null"]:
+                continue
             try:
                 lat_val = float(row[lat_col])
                 lon_val = float(row[lon_col])
                 if not math.isnan(lat_val) and not math.isnan(lon_val):
-                    points[name_val] = {"lat": lat_val, "lon": lon_val}
+                    points[raw_name] = {"lat": lat_val, "lon": lon_val}
             except (ValueError, TypeError):
                 continue
 
         return points
     except Exception as e:
-        st.sidebar.error(f"Lỗi đọc file Excel dữ liệu gốc: {e}")
+        st.sidebar.error(f"Lỗi đọc file {file_path}: {e}")
         return {}
 
 
-# Đường dẫn tới file Excel chứa dữ liệu tọa độ gốc của bạn
-EXCEL_DATA_PATH = "data.xlsx"  # Có thể đổi thành .xls hoặc đường dẫn thực tế của bạn
+# Đường dẫn file Excel gốc (Đảm bảo file data.xlsx hoặc data.xls tồn tại)
+EXCEL_DATA_PATH = "data.xlsx"
+if not os.path.exists(EXCEL_DATA_PATH) and os.path.exists("data.xls"):
+    EXCEL_DATA_PATH = "data.xls"
+
 all_points = load_excel_data(EXCEL_DATA_PATH)
 unique_keys = sorted(list(all_points.keys()))
+
+if not unique_keys:
+    st.sidebar.error(f"⚠️ Không tìm thấy tập điểm nào trong file '{EXCEL_DATA_PATH}'. Vui lòng kiểm tra lại file Excel dữ liệu gốc!")
+
+# Tạo dictionary chuẩn hóa (đã viết hoa và xóa dấu cách) để hỗ trợ map file upload dễ dàng
+normalized_all_points = {k.strip().upper(): k for k in all_points.keys()}
+
 
 # -------------------------------------------------------------
 # 4. SIDEBAR & ĐỊA ĐIỂM
 # -------------------------------------------------------------
 st.sidebar.header("Make by BangNC13")
-api_key_input = st.sidebar.text_input(
-    "🔑 Google API Key (Tùy chọn)", type="password"
-)
 
 search_query = st.sidebar.text_input(
     "Nhập điểm cuối hành trình (nếu muốn)", placeholder="Chợ Tam Cờ..."
@@ -174,7 +201,7 @@ selected_from_list = st.sidebar.multiselect(
     "Chọn điểm cần đi:", options=unique_keys
 )
 
-# Upload thêm danh sách danh sách mã điểm từ Excel bên ngoài (nếu cần lọc nhanh)
+# Upload file Excel để tự động map chọn điểm
 uploaded_file = st.sidebar.file_uploader(
     "Hoặc Upload danh sách điểm từ Excel:", type=["xlsx", "xls"]
 )
@@ -182,17 +209,21 @@ uploaded_file = st.sidebar.file_uploader(
 excel_points = []
 if uploaded_file:
     try:
-        df_upload = pd.read_excel(uploaded_file, header=None).astype(str)
-        flat_series = df_upload.values.flatten()
-        matched = [
-            val.strip()
-            for val in flat_series
-            if val.strip() in all_points
-        ]
-        excel_points.extend(matched)
-        st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm hợp lệ từ file.")
+        df_uploaded = pd.read_excel(uploaded_file, header=None).astype(str)
+        flat_values = df_uploaded.values.flatten()
+        
+        for val in flat_values:
+            val_clean = str(val).strip().upper()
+            if val_clean in normalized_all_points:
+                excel_points.append(normalized_all_points[val_clean])
+                
+        matched_unique = list(set(excel_points))
+        if matched_unique:
+            st.sidebar.info(f"✅ Đã map thành công {len(matched_unique)} điểm từ file Excel upload.")
+        else:
+            st.sidebar.warning("⚠️ Không tìm thấy mã điểm nào khớp với cơ sở dữ liệu hệ thống.")
     except Exception as e:
-        st.sidebar.error(f"Lỗi đọc file Upload: {e}")
+        st.sidebar.error(f"Lỗi xử lý file Upload: {e}")
 
 final_selected_names = list(set(selected_from_list + excel_points))
 
@@ -326,6 +357,7 @@ if st.sidebar.button("🚀 Lộ trình"):
                     "lon": all_points[name]["lon"],
                 }
                 for name in final_selected_names
+                if name in all_points
             ]
 
             opt_route = solve_tsp_google_style(gps_start, pts, end_location)
