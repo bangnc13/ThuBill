@@ -1,7 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor
+import glob
 import json
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor
 import folium
 from folium.plugins import LocateControl
 import pandas as pd
@@ -20,7 +21,7 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. LOGO & CSS HIỆU ỨNG (Giữ nguyên giao diện của bạn)
+# 1. LOGO & CSS HIỆU ỨNG
 # -------------------------------------------------------------
 logo_path = "FPT_Telecom_logo.png"
 if os.path.exists(logo_path):
@@ -90,33 +91,44 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD DATA GEOJSON
+# 3. LOAD DỮ LIỆU TỪ TẤT CẢ FILE .JSON IN FOLDER
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
-def load_geojson(file_path):
-    if not os.path.exists(file_path):
-        return {}
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
+def load_all_json_files():
     points = {}
-    for feature in data.get("features", []):
-        if feature.get("geometry", {}).get("type") == "Point":
-            coords = feature["geometry"]["coordinates"]
-            for val in feature.get("properties", {}).values():
-                val_str = str(val).strip()
-                if "TQGP0" in val_str.upper():
-                    points[val_str] = {"lat": coords[1], "lon": coords[0]}
+    json_files = glob.glob("*.json")  # Tìm tất cả các file có đuôi .json
+
+    for file_path in json_files:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, dict) and "features" in data:
+                for feature in data.get("features", []):
+                    if feature.get("geometry", {}).get("type") == "Point":
+                        coords = feature["geometry"]["coordinates"]
+                        for val in feature.get("properties", {}).values():
+                            val_str = str(val).strip()
+                            if "TQGP0" in val_str.upper():
+                                points[val_str] = {
+                                    "lat": coords[1],
+                                    "lon": coords[0],
+                                }
+        except Exception:
+            continue
+
     return points
 
 
-all_points = load_geojson("data.geojson")
+all_points = load_all_json_files()
 unique_keys = sorted(list(all_points.keys()))
 
 # -------------------------------------------------------------
 # 4. SIDEBAR & ĐỊA ĐIỂM
 # -------------------------------------------------------------
 st.sidebar.header("Make by BangNC13")
+st.sidebar.info(f"📂 Đã tải {len(unique_keys)} điểm từ các file JSON.")
+
 api_key_input = st.sidebar.text_input(
     "🔑 Google API Key (Tùy chọn)", type="password"
 )
@@ -196,11 +208,6 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 
 def fetch_smart_segment(pair):
-    """
-    Tự động ép bám đường giao thông.
-    Nếu dùng OSRM, bỏ tham số cắt thẳng và tăng snapping radius lên 2500m
-    để không bao giờ đâm ngang sông/núi.
-    """
     p1, p2 = pair
     url = (
         f"http://router.project-osrm.org/route/v1/driving/"
@@ -221,7 +228,6 @@ def fetch_smart_segment(pair):
     except Exception:
         pass
 
-    # Trường hợp đứt mạng tuyệt đối mới dùng đường thẳng
     direct_dist = haversine_distance(p1[0], p1[1], p2[0], p2[1])
     return [[p1[0], p1[1]], [p2[0], p2[1]]], direct_dist
 
@@ -338,7 +344,7 @@ def build_map(center):
     return m
 
 
-# KHU VỰC RENDER MAIN VIEW (ĐẢM BẢO KHÔNG BỊ ĐEN MÀN HÌNH)
+# RENDER MAIN VIEW
 if st.session_state.calculated_route and st.session_state.route_cache:
     route = st.session_state.calculated_route
     s_lat, s_lon = st.session_state.start_coords
