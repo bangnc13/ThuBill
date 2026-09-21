@@ -1,9 +1,7 @@
-from concurrent.futures import ThreadPoolExecutor
-import glob
 import json
 import math
 import os
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import folium
 from folium.plugins import LocateControl
 import pandas as pd
@@ -22,7 +20,7 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. LOGO & CSS HIỆU ỨNG
+# 1. LOGO & CSS HIỆU ỨNG (Giữ nguyên giao diện của bạn)
 # -------------------------------------------------------------
 logo_path = "FPT_Telecom_logo.png"
 if os.path.exists(logo_path):
@@ -92,124 +90,33 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json VỚI LOG DEBUG
+# 3. LOAD DATA GEOJSON
 # -------------------------------------------------------------
-@st.cache_data(ttl=30, show_spinner=False)
-def load_all_json_files():
+@st.cache_data(show_spinner=False)
+def load_geojson(file_path):
+    if not os.path.exists(file_path):
+        return {}
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
     points = {}
-    logs = []
-
-    # Danh sách thư mục tìm kiếm
-    current_file_dir = Path(__file__).resolve().parent
-    cwd_dir = Path.cwd()
-    search_dirs = list(set([current_file_dir, cwd_dir]))
-
-    logs.append(f"📁 Thư mục đang đứng: {cwd_dir}")
-    logs.append(f"📁 Thư mục file app: {current_file_dir}")
-
-    found_files = []
-    for base_path in search_dirs:
-        # Tìm file không phân biệt hoa thường
-        for ext in ["*.json", "*.Json", "*.JSON"]:
-            found_files.extend(list(base_path.rglob(ext)))
-
-    found_files = list(set(found_files))
-    logs.append(f"🔍 Tìm thấy tổng số file .json: {len(found_files)}")
-
-    for file_path in found_files:
-        try:
-            point_name = file_path.stem.upper().strip()
-
-            # Lọc các file dạng TQGP...
-            if "TQGP" not in point_name:
-                continue
-
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            lat, lon = None, None
-
-            # GeoJSON (FeatureCollection / Feature)
-            if isinstance(data, dict):
-                features = data.get("features", [])
-                if not features and data.get("type") == "Feature":
-                    features = [data]
-
-                for feature in features:
-                    geom = feature.get("geometry", {})
-                    if geom.get("type") == "Point" and "coordinates" in geom:
-                        coords = geom["coordinates"]
-                        lon, lat = coords[0], coords[1]
-                        break
-
-                if lat is None:
-                    lat = data.get("lat") or data.get("latitude")
-                    lon = (
-                        data.get("lon")
-                        or data.get("lng")
-                        or data.get("longitude")
-                    )
-
-            # Mảng [lon, lat] hoặc [lat, lon]
-            elif isinstance(data, list) and len(data) >= 2:
-                lon, lat = data[0], data[1]
-
-            if lat is not None and lon is not None:
-                points[point_name] = {"lat": float(lat), "lon": float(lon)}
-
-        except Exception as e:
-            logs.append(f"❌ Lỗi đọc file {file_path.name}: {str(e)}")
-
-    # Nếu vẫn chưa tìm thấy, gọi thử qua GitHub API công khai
-    if not points:
-        try:
-            github_url = (
-                "https://api.github.com/repos/bangnc13/ThuBill/contents/"
-            )
-            headers = {"User-Agent": "StreamlitApp"}
-            res = requests.get(github_url, headers=headers, timeout=5)
-            logs.append(f"🌐 GitHub API HTTP Status: {res.status_code}")
-
-            if res.status_code == 200:
-                items = res.json()
-                for item in items:
-                    name = item.get("name", "")
-                    point_name = os.path.splitext(name)[0].upper().strip()
-                    if "TQGP" in point_name and name.lower().endswith(".json"):
-                        raw_url = item.get("download_url")
-                        if raw_url:
-                            f_data = requests.get(
-                                raw_url, headers=headers, timeout=3
-                            ).json()
-                            features = f_data.get("features", [])
-                            if features:
-                                coords = features[0]["geometry"]["coordinates"]
-                                points[point_name] = {
-                                    "lat": float(coords[1]),
-                                    "lon": float(coords[0]),
-                                }
-        except Exception as ex:
-            logs.append(f"❌ Lỗi GitHub API: {str(ex)}")
-
-    return points, logs
+    for feature in data.get("features", []):
+        if feature.get("geometry", {}).get("type") == "Point":
+            coords = feature["geometry"]["coordinates"]
+            for val in feature.get("properties", {}).values():
+                val_str = str(val).strip()
+                if "TQGP0" in val_str.upper():
+                    points[val_str] = {"lat": coords[1], "lon": coords[0]}
+    return points
 
 
-all_points, debug_logs = load_all_json_files()
+all_points = load_geojson("data.geojson")
 unique_keys = sorted(list(all_points.keys()))
 
 # -------------------------------------------------------------
 # 4. SIDEBAR & ĐỊA ĐIỂM
 # -------------------------------------------------------------
 st.sidebar.header("Make by BangNC13")
-
-if len(unique_keys) > 0:
-    st.sidebar.success(f"📂 Đã tải thành công {len(unique_keys)} điểm TQGP.")
-else:
-    st.sidebar.error("⚠️ Chưa tìm thấy file TQGPxxx.json nào trong thư mục!")
-    with st.sidebar.expander("🔍 Lịch sử kiểm tra (Debug Log)"):
-        for log in debug_logs:
-            st.write(log)
-
 api_key_input = st.sidebar.text_input(
     "🔑 Google API Key (Tùy chọn)", type="password"
 )
@@ -239,7 +146,7 @@ if search_query:
 
 st.sidebar.header("📋 Chọn lộ trình di chuyển")
 selected_from_list = st.sidebar.multiselect(
-    "Chọn điểm TQGP...:", options=unique_keys
+    "Chọn điểm TQGP0xx:", options=unique_keys
 )
 uploaded_file = st.sidebar.file_uploader(
     "Hoặc Upload file Excel:", type=["xlsx", "xls"]
@@ -251,9 +158,9 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file, header=None).astype(str)
         flat_series = df.values.flatten()
         matched = [
-            val.strip().upper()
+            val.strip()
             for val in flat_series
-            if val.strip().upper() in all_points
+            if "TQGP0" in val.upper() and val.strip() in all_points
         ]
         excel_points.extend(matched)
         st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm từ Excel.")
@@ -267,7 +174,6 @@ show_labels = st.sidebar.checkbox("🏷️ Hiện tên điểm (Label)", value=T
 show_route_line = st.sidebar.checkbox("🛣️ Hiện đường vẽ lộ trình", value=True)
 
 if st.sidebar.button("🔄 Làm mới bản đồ"):
-    st.cache_data.clear()
     st.session_state.calculated_route = None
     st.session_state.route_cache = None
     st.rerun()
@@ -290,6 +196,11 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 
 def fetch_smart_segment(pair):
+    """
+    Tự động ép bám đường giao thông.
+    Nếu dùng OSRM, bỏ tham số cắt thẳng và tăng snapping radius lên 2500m
+    để không bao giờ đâm ngang sông/núi.
+    """
     p1, p2 = pair
     url = (
         f"http://router.project-osrm.org/route/v1/driving/"
@@ -310,6 +221,7 @@ def fetch_smart_segment(pair):
     except Exception:
         pass
 
+    # Trường hợp đứt mạng tuyệt đối mới dùng đường thẳng
     direct_dist = haversine_distance(p1[0], p1[1], p2[0], p2[1])
     return [[p1[0], p1[1]], [p2[0], p2[1]]], direct_dist
 
@@ -381,7 +293,7 @@ if "route_cache" not in st.session_state:
 if st.sidebar.button("🚀 Lộ trình"):
     if not final_selected_names and not end_location:
         st.sidebar.warning(
-            "Vui lòng chọn điểm TQGP... hoặc nhập Điểm Kết Thúc!"
+            "Vui lòng chọn điểm TQGP0xx hoặc nhập Điểm Kết Thúc!"
         )
     else:
         with st.spinner("Đang tối ưu bám đường xe máy..."):
@@ -426,7 +338,7 @@ def build_map(center):
     return m
 
 
-# RENDER MAIN VIEW
+# KHU VỰC RENDER MAIN VIEW (ĐẢM BẢO KHÔNG BỊ ĐEN MÀN HÌNH)
 if st.session_state.calculated_route and st.session_state.route_cache:
     route = st.session_state.calculated_route
     s_lat, s_lon = st.session_state.start_coords
