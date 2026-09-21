@@ -3,6 +3,7 @@ import glob
 import json
 import math
 import os
+from pathlib import Path
 import folium
 from folium.plugins import LocateControl
 import pandas as pd
@@ -91,29 +92,28 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json (ĐƯỜNG DẪN TỰ ĐỘNG CHUẨN)
+# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json (ĐA PHƯƠNG THỨC)
 # -------------------------------------------------------------
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_all_json_files():
     points = {}
-    
-    # Lấy thư mục chứa file code hiện tại
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-    except NameError:
-        base_dir = os.getcwd()
 
-    # Tìm tất cả file .json/.Json ở thư mục mã nguồn và toàn bộ thư mục con
-    search_pattern_1 = os.path.join(base_dir, "**", "*.json")
-    search_pattern_2 = os.path.join(base_dir, "**", "*.Json")
-    json_files = glob.glob(search_pattern_1, recursive=True) + glob.glob(search_pattern_2, recursive=True)
+    # Phương pháp 1: Duyệt qua Pathlib ở tất cả các thư mục gốc và thư mục con
+    root_paths = [Path("."), Path(__file__).parent]
+    json_files = []
+
+    for r_path in root_paths:
+        json_files.extend(list(r_path.rglob("*.json")))
+        json_files.extend(list(r_path.rglob("*.Json")))
+
+    # Loại bỏ file trùng
+    json_files = list(set(json_files))
 
     for file_path in json_files:
         try:
-            filename = os.path.basename(file_path)
-            point_name = os.path.splitext(filename)[0].upper().strip()
+            filename = file_path.name
+            point_name = file_path.stem.upper().strip()
 
-            # Lọc các file có tên chứa cụm TQGP
             if "TQGP" not in point_name:
                 continue
 
@@ -122,7 +122,7 @@ def load_all_json_files():
 
             lat, lon = None, None
 
-            # TH 1: Định dạng GeoJSON chuẩn (FeatureCollection hoặc Feature)
+            # TH 1: GeoJSON
             if isinstance(data, dict):
                 features = data.get("features", [])
                 if not features and data.get("type") == "Feature":
@@ -135,12 +135,15 @@ def load_all_json_files():
                         lon, lat = coords[0], coords[1]
                         break
 
-                # TH 2: Dictionary dạng {"lat": ..., "lon": ...}
                 if lat is None:
                     lat = data.get("lat") or data.get("latitude")
-                    lon = data.get("lon") or data.get("lng") or data.get("longitude")
+                    lon = (
+                        data.get("lon")
+                        or data.get("lng")
+                        or data.get("longitude")
+                    )
 
-            # TH 3: List dạng [lon, lat] hoặc [lat, lon]
+            # TH 2: List [lon, lat] hoặc [lat, lon]
             elif isinstance(data, list) and len(data) >= 2:
                 lon, lat = data[0], data[1]
 
@@ -149,6 +152,36 @@ def load_all_json_files():
 
         except Exception:
             continue
+
+    # Phương pháp 2: Dự phòng quét GitHub API nếu trên Streamlit Cloud không thấy file local
+    if not points:
+        try:
+            github_url = (
+                "https://api.github.com/repos/bangnc13/ThuBill/contents/"
+            )
+            res = requests.get(github_url, timeout=5).json()
+            if isinstance(res, list):
+                for item in res:
+                    name = item.get("name", "")
+                    point_name = os.path.splitext(name)[0].upper()
+                    if "TQGP" in point_name and (
+                        name.endswith(".json") or name.endswith(".Json")
+                    ):
+                        download_url = item.get("download_url")
+                        if download_url:
+                            file_res = requests.get(
+                                download_url, timeout=3
+                            ).json()
+                            # Đọc tọa độ từ GeoJSON GitHub
+                            features = file_res.get("features", [])
+                            if features:
+                                coords = features[0]["geometry"]["coordinates"]
+                                points[point_name] = {
+                                    "lat": float(coords[1]),
+                                    "lon": float(coords[0]),
+                                }
+        except Exception:
+            pass
 
     return points
 
@@ -223,7 +256,7 @@ show_labels = st.sidebar.checkbox("🏷️ Hiện tên điểm (Label)", value=T
 show_route_line = st.sidebar.checkbox("🛣️ Hiện đường vẽ lộ trình", value=True)
 
 if st.sidebar.button("🔄 Làm mới bản đồ"):
-    st.cache_data.clear()  # Xóa sạch cache dữ liệu cũ
+    st.cache_data.clear()
     st.session_state.calculated_route = None
     st.session_state.route_cache = None
     st.rerun()
