@@ -11,3 +11,10 @@ streamlit-folium
 geopy
 pandas
 openpyxl
+streamlit
+streamlit-folium
+streamlit-js-eval
+pandas
+openpyxl
+requests
+folium
