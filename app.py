@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. LOGO & CSS HIỆU ỨNG (Giữ nguyên giao diện của bạn)
+# 1. LOGO & CSS HIỆU ỨNG
 # -------------------------------------------------------------
 logo_path = "FPT_Telecom_logo.png"
 if os.path.exists(logo_path):
@@ -90,27 +90,52 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD DATA GEOJSON
+# 3. LOAD DATA TỪ FILE EXCEL (THAY THẾ GEOJSON)
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
-def load_geojson(file_path):
+def load_excel_data(file_path):
+    """
+    Đọc file Excel dữ liệu gốc. 
+    Yêu cầu file Excel chứa các cột: Tên (chứa mã TQGP0xx), Lat/Vĩ độ, Lon/Kinh độ.
+    """
     if not os.path.exists(file_path):
         return {}
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
 
-    points = {}
-    for feature in data.get("features", []):
-        if feature.get("geometry", {}).get("type") == "Point":
-            coords = feature["geometry"]["coordinates"]
-            for val in feature.get("properties", {}).values():
-                val_str = str(val).strip()
-                if "TQGP0" in val_str.upper():
-                    points[val_str] = {"lat": coords[1], "lon": coords[0]}
-    return points
+    try:
+        df = pd.read_excel(file_path)
+        points = {}
+
+        # Chuẩn hóa tên cột để tránh lỗi viết hoa/thường
+        cols = {str(col).strip().lower(): col for col in df.columns}
+
+        # Xác định cột tên, lat, lon
+        name_col = next((cols[c] for c in cols if "name" in c or "tên" in c or "mã" in c or "point" in c), df.columns[0])
+        lat_col = next((cols[c] for c in cols if "lat" in c or "vĩ" in c), None)
+        lon_col = next((cols[c] for c in cols if "lon" in c or "lng" in c or "kinh" in c), None)
+
+        if not lat_col or not lon_col:
+            # Trường hợp file không phân cột rõ ràng, lấy theo thứ tự cột 0, 1, 2
+            name_col, lat_col, lon_col = df.columns[0], df.columns[1], df.columns[2]
+
+        for _, row in df.iterrows():
+            name_val = str(row[name_col]).strip()
+            try:
+                lat_val = float(row[lat_col])
+                lon_val = float(row[lon_col])
+                if not math.isnan(lat_val) and not math.isnan(lon_val):
+                    points[name_val] = {"lat": lat_val, "lon": lon_val}
+            except (ValueError, TypeError):
+                continue
+
+        return points
+    except Exception as e:
+        st.sidebar.error(f"Lỗi đọc file Excel dữ liệu gốc: {e}")
+        return {}
 
 
-all_points = load_geojson("data.geojson")
+# Đường dẫn tới file Excel chứa dữ liệu tọa độ gốc của bạn
+EXCEL_DATA_PATH = "data.xlsx"  # Có thể đổi thành .xls hoặc đường dẫn thực tế của bạn
+all_points = load_excel_data(EXCEL_DATA_PATH)
 unique_keys = sorted(list(all_points.keys()))
 
 # -------------------------------------------------------------
@@ -146,26 +171,28 @@ if search_query:
 
 st.sidebar.header("📋 Chọn lộ trình di chuyển")
 selected_from_list = st.sidebar.multiselect(
-    "Chọn điểm TQGP0xx:", options=unique_keys
+    "Chọn điểm cần đi:", options=unique_keys
 )
+
+# Upload thêm danh sách danh sách mã điểm từ Excel bên ngoài (nếu cần lọc nhanh)
 uploaded_file = st.sidebar.file_uploader(
-    "Hoặc Upload file Excel:", type=["xlsx", "xls"]
+    "Hoặc Upload danh sách điểm từ Excel:", type=["xlsx", "xls"]
 )
 
 excel_points = []
 if uploaded_file:
     try:
-        df = pd.read_excel(uploaded_file, header=None).astype(str)
-        flat_series = df.values.flatten()
+        df_upload = pd.read_excel(uploaded_file, header=None).astype(str)
+        flat_series = df_upload.values.flatten()
         matched = [
             val.strip()
             for val in flat_series
-            if "TQGP0" in val.upper() and val.strip() in all_points
+            if val.strip() in all_points
         ]
         excel_points.extend(matched)
-        st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm từ Excel.")
+        st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm hợp lệ từ file.")
     except Exception as e:
-        st.sidebar.error(f"Lỗi đọc file Excel: {e}")
+        st.sidebar.error(f"Lỗi đọc file Upload: {e}")
 
 final_selected_names = list(set(selected_from_list + excel_points))
 
@@ -180,7 +207,7 @@ if st.sidebar.button("🔄 Làm mới bản đồ"):
 
 
 # -------------------------------------------------------------
-# 5. THUẬT TOÁN BÁM ĐƯỜNG XE MÁY CHUẨN GOOGLE / OSRM SMART
+# 5. THUẬT TOÁN BÁM ĐƯỜNG XE MÁY CHUẨN OSRM SMART
 # -------------------------------------------------------------
 def haversine_distance(lat1, lon1, lat2, lon2):
     R = 6371.0
@@ -196,11 +223,6 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 
 def fetch_smart_segment(pair):
-    """
-    Tự động ép bám đường giao thông.
-    Nếu dùng OSRM, bỏ tham số cắt thẳng và tăng snapping radius lên 2500m
-    để không bao giờ đâm ngang sông/núi.
-    """
     p1, p2 = pair
     url = (
         f"http://router.project-osrm.org/route/v1/driving/"
@@ -221,7 +243,6 @@ def fetch_smart_segment(pair):
     except Exception:
         pass
 
-    # Trường hợp đứt mạng tuyệt đối mới dùng đường thẳng
     direct_dist = haversine_distance(p1[0], p1[1], p2[0], p2[1])
     return [[p1[0], p1[1]], [p2[0], p2[1]]], direct_dist
 
@@ -293,7 +314,7 @@ if "route_cache" not in st.session_state:
 if st.sidebar.button("🚀 Lộ trình"):
     if not final_selected_names and not end_location:
         st.sidebar.warning(
-            "Vui lòng chọn điểm TQGP0xx hoặc nhập Điểm Kết Thúc!"
+            "Vui lòng chọn điểm di chuyển hoặc nhập Điểm Kết Thúc!"
         )
     else:
         with st.spinner("Đang tối ưu bám đường xe máy..."):
@@ -338,7 +359,7 @@ def build_map(center):
     return m
 
 
-# KHU VỰC RENDER MAIN VIEW (ĐẢM BẢO KHÔNG BỊ ĐEN MÀN HÌNH)
+# RENDER BẢN ĐỒ MAIN VIEW
 if st.session_state.calculated_route and st.session_state.route_cache:
     route = st.session_state.calculated_route
     s_lat, s_lon = st.session_state.start_coords
