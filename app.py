@@ -91,23 +91,30 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json
+# 3. LOAD TOÀN BỘ CÁC FILE TQGPxxx.json (ĐƯỜNG DẪN TỰ ĐỘNG CHUẨN)
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_all_json_files():
     points = {}
-    # Quét tất cả file .json ở thư mục hiện tại và các thư mục con
-    json_files = glob.glob("**/*.json", recursive=True) + glob.glob(
-        "**/*.Json", recursive=True
-    )
+    
+    # Lấy thư mục chứa file code hiện tại
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        base_dir = os.getcwd()
+
+    # Tìm tất cả file .json/.Json ở thư mục mã nguồn và toàn bộ thư mục con
+    search_pattern_1 = os.path.join(base_dir, "**", "*.json")
+    search_pattern_2 = os.path.join(base_dir, "**", "*.Json")
+    json_files = glob.glob(search_pattern_1, recursive=True) + glob.glob(search_pattern_2, recursive=True)
 
     for file_path in json_files:
         try:
             filename = os.path.basename(file_path)
-            point_name = os.path.splitext(filename)[0].upper()
+            point_name = os.path.splitext(filename)[0].upper().strip()
 
-            # Lọc các file dạng TQGP...
-            if not point_name.startswith("TQGP"):
+            # Lọc các file có tên chứa cụm TQGP
+            if "TQGP" not in point_name:
                 continue
 
             with open(file_path, "r", encoding="utf-8") as f:
@@ -115,7 +122,7 @@ def load_all_json_files():
 
             lat, lon = None, None
 
-            # Trường hợp 1: GeoJSON chuẩn (FeatureCollection hoặc Feature)
+            # TH 1: Định dạng GeoJSON chuẩn (FeatureCollection hoặc Feature)
             if isinstance(data, dict):
                 features = data.get("features", [])
                 if not features and data.get("type") == "Feature":
@@ -128,16 +135,12 @@ def load_all_json_files():
                         lon, lat = coords[0], coords[1]
                         break
 
-                # Trường hợp 2: JSON dạng dict {"lat": ..., "lon": ...}
+                # TH 2: Dictionary dạng {"lat": ..., "lon": ...}
                 if lat is None:
                     lat = data.get("lat") or data.get("latitude")
-                    lon = (
-                        data.get("lon")
-                        or data.get("lng")
-                        or data.get("longitude")
-                    )
+                    lon = data.get("lon") or data.get("lng") or data.get("longitude")
 
-            # Trường hợp 3: JSON dạng mảng tọa độ [lon, lat] hoặc [lat, lon]
+            # TH 3: List dạng [lon, lat] hoặc [lat, lon]
             elif isinstance(data, list) and len(data) >= 2:
                 lon, lat = data[0], data[1]
 
@@ -220,6 +223,7 @@ show_labels = st.sidebar.checkbox("🏷️ Hiện tên điểm (Label)", value=T
 show_route_line = st.sidebar.checkbox("🛣️ Hiện đường vẽ lộ trình", value=True)
 
 if st.sidebar.button("🔄 Làm mới bản đồ"):
+    st.cache_data.clear()  # Xóa sạch cache dữ liệu cũ
     st.session_state.calculated_route = None
     st.session_state.route_cache = None
     st.rerun()
