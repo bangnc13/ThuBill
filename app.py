@@ -8,7 +8,7 @@ from folium.plugins import LocateControl
 import pandas as pd
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_js_eval import get_geolocation
 from streamlit_folium import st_folium
 
 # -------------------------------------------------------------
@@ -62,50 +62,25 @@ st.markdown(
 )
 
 # -------------------------------------------------------------
-# 2. LẤY TỌA ĐỘ GPS REALTIME TỪ ĐIỆN THOẠI/TRÌNH DUYỆT
+# 2. LẤY TỌA ĐỘ GPS REALTIME TRỰC TIẾP TỪ THIẾT BỊ DÙNG STREAMLIT-JS-EVAL
 # -------------------------------------------------------------
-# Đặt mặc định tạm thời nếu thiết bị chưa bắt được GPS
-if "user_gps" not in st.session_state:
-    st.session_state.user_gps = {"lat": 21.82714, "lon": 105.19952}
+location_data = get_geolocation()
 
-# Nhúng HTML/JS lấy tọa độ GPS thực tế từ thiết bị di động
-gps_component = components.html(
-    """
-    <script>
-    function sendLocation() {
-        if ("geolocation" in navigator) {
-            navigator.geolocation.getCurrentPosition(
-                function(position) {
-                    window.parent.postMessage({
-                        type: "streamlit:setComponentValue",
-                        value: {
-                            lat: position.coords.latitude,
-                            lon: position.coords.longitude
-                        }
-                    }, "*");
-                },
-                function(error) {
-                    console.log("GPS Error: ", error.message);
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
-            );
-        }
-    }
-    sendLocation();
-    </script>
-    """,
-    height=0,
-)
+curr_lat = None
+curr_lon = None
 
-if gps_component and isinstance(gps_component, dict) and "lat" in gps_component:
-    st.session_state.user_gps = gps_component
+if location_data and "coords" in location_data:
+    curr_lat = location_data["coords"]["latitude"]
+    curr_lon = location_data["coords"]["longitude"]
+    st.session_state.real_gps = (curr_lat, curr_lon)
 
-curr_lat = st.session_state.user_gps["lat"]
-curr_lon = st.session_state.user_gps["lon"]
+# Nếu chưa lấy được GPS từ thiết bị, ưu tiên dùng GPS đã lưu trong session hoặc báo chờ
+if curr_lat is None or curr_lon is None:
+    if "real_gps" in st.session_state:
+        curr_lat, curr_lon = st.session_state.real_gps
+    else:
+        # Tọa độ mặc định tạm thời chỉ khi thiết bị từ chối/chưa gửi GPS
+        curr_lat, curr_lon = 21.82714, 105.19952
 
 
 # -------------------------------------------------------------
@@ -204,9 +179,7 @@ all_points = load_excel_data()
 unique_keys = sorted(list(all_points.keys()))
 
 if not unique_keys:
-    st.sidebar.error(
-        "⚠️ Không tìm thấy tập điểm nào trong file Data.xlsx! Vui lòng kiểm tra lại file dữ liệu."
-    )
+    st.sidebar.error("⚠️ Không tìm thấy tập điểm nào trong file Data.xlsx!")
 
 normalized_all_points = {k.strip().upper(): k for k in all_points.keys()}
 
@@ -216,10 +189,13 @@ normalized_all_points = {k.strip().upper(): k for k in all_points.keys()}
 # -------------------------------------------------------------
 st.sidebar.header("Make by BangNC13")
 
-# Hiển thị thông báo vị trí GPS Realtime hiện tại
-st.sidebar.info(
-    f"📍 **Vị trí GPS điện thoại:**\n`Lat: {curr_lat:.5f}, Lon: {curr_lon:.5f}`"
-)
+# Hiển thị vị trí GPS Realtime thiết bị thu thập được
+if location_data and "coords" in location_data:
+    st.sidebar.success(
+        f"🟢 **Đã nhận GPS thiết bị:**\n`Lat: {curr_lat:.5f}, Lon: {curr_lon:.5f}`"
+    )
+else:
+    st.sidebar.warning("⏳ Đang định vị GPS từ điện thoại/trình duyệt...")
 
 search_query = st.sidebar.text_input(
     "Nhập điểm cuối hành trình (nếu muốn)", placeholder="Chợ Tam Cờ..."
@@ -399,8 +375,10 @@ if st.sidebar.button("🚀 Lộ trình"):
             "Vui lòng chọn điểm di chuyển hoặc nhập Điểm Kết Thúc!"
         )
     else:
-        with st.spinner("Đang tính toán từ vị trí GPS Realtime của bạn..."):
-            # Lấy tọa độ GPS realtime mới nhất từ điện thoại
+        with st.spinner(
+            "Đang lấy vị trí GPS Realtime hiện tại làm điểm BẮT ĐẦU..."
+        ):
+            # BẮT BUỘC điểm bắt đầu luôn luôn là tọa độ GPS Realtime
             gps_start = (curr_lat, curr_lon)
 
             pts = [
@@ -438,7 +416,6 @@ def build_map(center):
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         attr="Google Maps",
     )
-    # Nút định vị vị trí người dùng trực tiếp trên bản đồ
     LocateControl(
         auto_start=False,
         flyTo=True,
@@ -461,11 +438,11 @@ if st.session_state.calculated_route and st.session_state.route_cache:
 
     m = build_map([s_lat, s_lon])
 
-    # Đánh dấu Vị trí GPS Realtime (Điểm bắt đầu)
+    # Điểm Xuất Phát Bắt Buộc là GPS Realtime
     folium.Marker(
         [s_lat, s_lon],
-        popup="🟢 Xuất phát (Vị trí GPS thực tế)",
-        tooltip="Vị trí hiện tại của bạn",
+        popup=f"🟢 Xuất phát: Vị trí GPS Thực tế ({s_lat:.5f}, {s_lon:.5f})",
+        tooltip="Vị trí xuất phát của bạn",
         icon=folium.Icon(color="green", icon="user", prefix="fa"),
     ).add_to(m)
 
@@ -515,7 +492,7 @@ else:
     m_default = build_map([curr_lat, curr_lon])
     folium.Marker(
         [curr_lat, curr_lon],
-        popup="🟢 Vị trí hiện tại của bạn",
+        popup=f"🟢 Vị trí GPS hiện tại: {curr_lat:.5f}, {curr_lon:.5f}",
         icon=folium.Icon(color="green", icon="user", prefix="fa"),
     ).add_to(m_default)
     st_folium(
