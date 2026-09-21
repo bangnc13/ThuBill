@@ -24,82 +24,121 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- THÔNG TIN TỔ CHỨC & TÁC GIẢ (SIDEBAR) ---
+# --- THÔNG TIN TỔ CHỨC & TÁC GIẢ ---
 with st.sidebar:
     st.markdown("<h1 style='color: #FF5722; margin-bottom:0;'>FPT Telecom</h1>", unsafe_allow_html=True)
     st.markdown("**Make by BangNC13**")
     st.markdown("---")
 
-    # --- HÀM ĐỌC DỮ LIỆU TỪ FILE JSON CẢI TIẾN ---
-    def extract_points_from_json_data(data, points_dict):
-        """Hàm đệ quy quét mọi cấu trúc JSON để tìm lat, lng và name"""
-        if isinstance(data, dict):
-            # Kiểm tra nếu object hiện tại chứa tên điểm và tọa độ
-            name = data.get("name") or data.get("ten") or data.get("label") or data.get("id")
-            lat = data.get("lat") or data.get("latitude") or data.get("y")
-            lng = data.get("lng") or data.get("long") or data.get("longitude") or data.get("x")
+    # --- HÀM TRUY XUẤT TỌA ĐỘ VÀ TÊN TỪ MỌI DẠNG OBJECT/LIST ---
+    def find_points_recursive(item, points_dict):
+        if isinstance(item, dict):
+            # Tìm tên điểm
+            name = None
+            for key in ['name', 'ten', 'label', 'id', 'ma_diem', 'point_name', 'title']:
+                if key in item and item[key]:
+                    name = str(item[key]).strip()
+                    break
             
+            # Nếu key chính là tên điểm (dạng {"TQGP001.0001/HO": [21.8, 105.2]})
+            if not name:
+                for k, v in item.items():
+                    if "TQGP" in str(k).upper():
+                        if isinstance(v, (list, tuple)) and len(v) >= 2:
+                            try:
+                                points_dict[str(k).strip()] = (float(v[0]), float(v[1]))
+                            except: pass
+                        elif isinstance(v, dict):
+                            find_points_recursive(v, points_dict)
+
+            # Tìm tọa độ lat, lng
+            lat, lng = None, None
+            # Trường hợp 1: Có key lat/lng/x/y trực tiếp
+            for k_lat in ['lat', 'latitude', 'y', 'toado_y', 'lat_degree']:
+                if k_lat in item and item[k_lat] is not None:
+                    try: lat = float(item[k_lat])
+                    except: pass
+                    break
+            for k_lng in ['lng', 'long', 'longitude', 'x', 'toado_x', 'lng_degree']:
+                if k_lng in item and item[k_lng] is not None:
+                    try: lng = float(item[k_lng])
+                    except: pass
+                    break
+            
+            # Trường hợp 2: Dạng GeoJSON coordinates [lng, lat]
+            if lat is None and 'coordinates' in item and isinstance(item['coordinates'], (list, tuple)):
+                if len(item['coordinates']) >= 2:
+                    try:
+                        lng = float(item['coordinates'][0])
+                        lat = float(item['coordinates'][1])
+                    except: pass
+
+            # Lưu vào dictionary nếu hợp lệ
             if name and lat is not None and lng is not None:
-                if "TQGP" in str(name).upper():
-                    points_dict[str(name)] = (float(lat), float(lng))
-            
-            for k, v in data.items():
+                # Lấy tất cả điểm hoặc lọc theo TQGP
+                points_dict[name] = (lat, lng)
+
+            # Tiếp tục duyệt đệ quy các key con
+            for k, v in item.items():
                 if isinstance(v, (dict, list)):
-                    extract_points_from_json_data(v, points_dict)
-                elif "TQGP" in str(k).upper() and isinstance(v, (list, tuple)) and len(v) >= 2:
-                    points_dict[str(k)] = (float(v[0]), float(v[1]))
+                    find_points_recursive(v, points_dict)
 
-        elif isinstance(data, list):
-            for item in data:
-                extract_points_from_json_data(item, points_dict)
+        elif isinstance(item, list):
+            for sub_item in item:
+                find_points_recursive(sub_item, points_dict)
 
+    # --- HÀM ĐỌC FILE JSON VỚI NHIỀU CHẾ ĐỘ ENCODING ---
     def load_all_tqgp_json():
         json_files = glob.glob("*.json")
         points = {}
         for file in json_files:
-            try:
-                with open(file, 'r', encoding='utf-8') as f:
-                    content = json.load(f)
-                    extract_points_from_json_data(content, points)
-            except Exception:
-                pass
+            content = None
+            # Thử nhiều chuẩn encoding khác nhau để tránh lỗi font/đọc file
+            for enc in ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252']:
+                try:
+                    with open(file, 'r', encoding=enc) as f:
+                        content = json.load(f)
+                        break
+                except Exception:
+                    continue
+            
+            if content:
+                find_points_recursive(content, points)
+                
         return json_files, points
 
     json_files, tqgp_points = load_all_tqgp_json()
 
-    # Khởi tạo state lưu trữ điểm được chọn
-    if "selected_points_list" not in st.session_state:
-        st.session_state.selected_points_list = []
-
-    # Thông báo số lượng dữ liệu
+    # Thống kê số lượng
     if not json_files:
         st.warning("⚠️ Chưa tìm thấy file .json nào trong thư mục!")
     else:
         st.success(f"Dữ liệu: Đã tải {len(json_files)} file JSON ({len(tqgp_points)} điểm TQGP)")
 
-    # Debug Log & API Key
+    # Debug Log
     with st.expander("🔍 Lịch sử kiểm tra (Debug Log)"):
-        st.write(f"Tổng số file JSON tìm thấy: {len(json_files)}")
-        st.write(f"Danh sách các điểm lọc được ({len(tqgp_points)}):")
-        st.json(list(tqgp_points.keys())[:10])  # Hiển thị 10 điểm đầu tiên để test
+        st.write(f"Tổng số file JSON phát hiện: {len(json_files)}")
+        st.write(f"Tổng số điểm tìm thấy: {len(tqgp_points)}")
+        if tqgp_points:
+            st.write("Danh sách 5 điểm mẫu:")
+            st.write(list(tqgp_points.items())[:5])
 
     api_key = st.text_input("🔑 Google API Key (Tùy chọn)", type="password")
     st.markdown("---")
     
-    # Nhập điểm cuối
     end_point_input = st.text_input("🎯 Nhập điểm cuối hành trình (nếu muốn)", placeholder="Chợ Tam Cờ...")
     
-    # Selectbox chọn điểm thủ công
-    manual_selected = st.multiselect(
+    # Danh sách chọn điểm thủ công
+    options_list = list(tqgp_points.keys())
+    selected_manual = st.multiselect(
         "📱 Chọn lộ trình di chuyển",
-        options=list(tqgp_points.keys()),
-        default=st.session_state.selected_points_list,
+        options=options_list,
         help="Chọn các điểm TQGPxxx.xxxx/HO cần đi qua"
     )
 
-    # UPLOAD FILE EXCEL / CSV
+    # XỬ LÝ UPLOAD FILE EXCEL / CSV
     st.markdown("**Hoặc Upload file Excel/CSV:**")
-    uploaded_file = st.file_uploader("Upload file Excel danh sách điểm", type=["xlsx", "xls", "csv"], label_visibility="collapsed")
+    uploaded_file = st.file_uploader("Upload file Excel/CSV", type=["xlsx", "xls", "csv"], label_visibility="collapsed")
 
     excel_points = {}
     if uploaded_file is not None:
@@ -109,25 +148,35 @@ with st.sidebar:
             else:
                 df = pd.read_excel(uploaded_file)
             
-            # Tìm các cột tương ứng
-            name_col = next((col for col in df.columns if any(k in col.lower() for k in ['ten', 'name', 'diem', 'tqgp'])), df.columns[0])
-            lat_col = next((col for col in df.columns if any(k in col.lower() for k in ['lat', 'y', 'toado_y'])), None)
-            lng_col = next((col for col in df.columns if any(k in col.lower() for k in ['lng', 'long', 'x', 'toado_x'])), None)
+            # Ép tên cột về dạng chữ thường để dễ so sánh
+            df.columns = [str(c).strip() for c in df.columns]
+            
+            # Tìm các cột Tên, Lat, Lng
+            col_name = next((c for c in df.columns if any(k in c.lower() for k in ['ten', 'name', 'diem', 'tqgp', 'id', 'label'])), df.columns[0])
+            col_lat = next((c for c in df.columns if any(k in c.lower() for k in ['lat', 'y', 'toado_y', 'latitude'])), None)
+            col_lng = next((c for c in df.columns if any(k in c.lower() for k in ['lng', 'long', 'x', 'toado_x', 'longitude'])), None)
 
             for _, row in df.iterrows():
-                pt_name = str(row[name_col]).strip()
-                if lat_col and lng_col and pd.notnull(row[lat_col]) and pd.notnull(row[lng_col]):
-                    excel_points[pt_name] = (float(row[lat_col]), float(row[lng_col]))
+                pt_name = str(row[col_name]).strip()
+                
+                # Nếu file Excel có cả cột Tọa độ
+                if col_lat and col_lng and pd.notnull(row[col_lat]) and pd.notnull(row[col_lng]):
+                    try:
+                        excel_points[pt_name] = (float(row[col_lat]), float(row[col_lng]))
+                    except: pass
+                # Nếu file Excel chỉ chứa tên điểm -> Khớp tên với tập điểm từ JSON
                 elif pt_name in tqgp_points:
                     excel_points[pt_name] = tqgp_points[pt_name]
 
             st.success(f"📌 Đã đọc {len(excel_points)} điểm từ file Excel upload!")
+            if len(excel_points) == 0:
+                st.error("⚠️ Không tìm thấy tọa độ khớp trong Excel hay JSON! Kiểm tra lại tên cột hoặc tên điểm.")
         except Exception as e:
             st.error(f"Lỗi đọc file Excel: {e}")
 
     st.markdown("---")
 
-    # Các tùy chọn vẽ
+    # Checkbox Tùy chỉnh
     show_labels = st.checkbox("📌 Hiện tên điểm (Label)", value=True)
     show_routes = st.checkbox("🛣️ Hiện đường vẽ lộ trình", value=True)
 
@@ -137,23 +186,21 @@ with st.sidebar:
     with col2:
         btn_route = st.button("🚀 Lộ trình", type="primary")
 
-# --- XỬ LÝ KHI BẤM NÚT "LỘ TRÌNH" HOẶC CHỌN ĐIỂM ---
-active_points = {}
+# --- QUYẾT ĐỊNH DANH SÁCH ĐIỂM SẼ HỌA ĐỒ ---
+points_to_draw = {}
 
-if btn_route:
-    # Ưu tiên lấy từ file Excel vừa upload, nếu không thì lấy từ Multiselect
+if btn_route or uploaded_file is not None:
     if excel_points:
-        active_points = excel_points
-    elif manual_selected:
-        active_points = {k: tqgp_points[k] for k in manual_selected if k in tqgp_points}
+        points_to_draw = excel_points
+    elif selected_manual:
+        points_to_draw = {k: tqgp_points[k] for k in selected_manual if k in tqgp_points}
     else:
-        # Nếu không chọn gì, lấy tất cả điểm tìm được
-        active_points = tqgp_points
+        points_to_draw = tqgp_points
 else:
-    if manual_selected:
-        active_points = {k: tqgp_points[k] for k in manual_selected if k in tqgp_points}
+    if selected_manual:
+        points_to_draw = {k: tqgp_points[k] for k in selected_manual if k in tqgp_points}
 
-# --- NÚT LẤY ĐỊNH VỊ REALTIME TỪ ĐIỆN THOẠI/TRÌNH DUYỆT ---
+# --- NÚT ĐỊNH VỊ REALTIME ---
 gps_code = """
 <script>
 function getLocation() {
@@ -173,17 +220,16 @@ function getLocation() {
 with st.sidebar:
     components.html(gps_code, height=80)
 
-# --- XỬ LÝ VẼ BẢN ĐỒ GOOGLE MAPS (MAIN VIEW) ---
+# --- VẼ BẢN ĐỒ GOOGLE MAPS ---
 default_center = [21.823, 105.215]  # Tuyên Quang
-zoom_level = 13
 
-if active_points:
-    coords_list = list(active_points.values())
+if points_to_draw:
+    coords_list = list(points_to_draw.values())
     default_center = [sum(p[0] for p in coords_list)/len(coords_list), sum(p[1] for p in coords_list)/len(coords_list)]
 
-m = folium.Map(location=default_center, zoom_start=zoom_level, tiles=None)
+m = folium.Map(location=default_center, zoom_start=13, tiles=None)
 
-# Layer xem phố Google Maps Roadmap (Chuẩn)
+# Lớp bản đồ đường phố Google Maps
 folium.TileLayer(
     tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
     attr="Google Maps",
@@ -191,9 +237,9 @@ folium.TileLayer(
     overlay=False
 ).add_to(m)
 
-# Thêm điểm & đường nối lộ trình
+# Thêm marker và vẽ đường
 route_coords = []
-for name, coord in active_points.items():
+for name, coord in points_to_draw.items():
     route_coords.append(coord)
     folium.Marker(
         location=coord,
@@ -208,9 +254,9 @@ if show_routes and len(route_coords) >= 2:
         color="#1E88E5",
         weight=5,
         opacity=0.8,
-        tooltip="Lộ trình di chuyển xe máy"
+        tooltip="Lộ trình di chuyển"
     ).add_to(m)
     m.fit_bounds(route_coords)
 
-# Hiển thị bản đồ Full màn hình
+# Hiển thị Full Screen
 st_folium(m, width="100%", height=800, returned_objects=[])
