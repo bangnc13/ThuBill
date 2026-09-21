@@ -62,29 +62,47 @@ st.markdown(
 )
 
 # -------------------------------------------------------------
-# 2. GPS REALTIME
+# 2. LẤY TỌA ĐỘ GPS REALTIME TỪ ĐIỆN THOẠI/TRÌNH DUYỆT
 # -------------------------------------------------------------
+# Đặt mặc định tạm thời nếu thiết bị chưa bắt được GPS
 if "user_gps" not in st.session_state:
     st.session_state.user_gps = {"lat": 21.82714, "lon": 105.19952}
-    gps_code = """
-    <script>
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                window.parent.postMessage({
-                    type: "streamlit:setComponentValue",
-                    value: {lat: pos.coords.latitude, lon: pos.coords.longitude}
-                }, "*");
-            },
-            (err) => console.error("Lỗi GPS:", err),
-            { enableHighAccuracy: true }
-        );
-    }
-    </script>
+
+# Nhúng HTML/JS lấy tọa độ GPS thực tế từ thiết bị di động
+gps_component = components.html(
     """
-    gps_data = components.html(gps_code, height=0)
-    if gps_data and isinstance(gps_data, dict) and "lat" in gps_data:
-        st.session_state.user_gps = gps_data
+    <script>
+    function sendLocation() {
+        if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    window.parent.postMessage({
+                        type: "streamlit:setComponentValue",
+                        value: {
+                            lat: position.coords.latitude,
+                            lon: position.coords.longitude
+                        }
+                    }, "*");
+                },
+                function(error) {
+                    console.log("GPS Error: ", error.message);
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        }
+    }
+    sendLocation();
+    </script>
+    """,
+    height=0,
+)
+
+if gps_component and isinstance(gps_component, dict) and "lat" in gps_component:
+    st.session_state.user_gps = gps_component
 
 curr_lat = st.session_state.user_gps["lat"]
 curr_lon = st.session_state.user_gps["lon"]
@@ -187,7 +205,7 @@ unique_keys = sorted(list(all_points.keys()))
 
 if not unique_keys:
     st.sidebar.error(
-        "⚠️ Không tìm thấy tập điểm nào trong file Data.xlsx! Vui lòng kiểm tra lại file dữ liệu trên thư mục gốc."
+        "⚠️ Không tìm thấy tập điểm nào trong file Data.xlsx! Vui lòng kiểm tra lại file dữ liệu."
     )
 
 normalized_all_points = {k.strip().upper(): k for k in all_points.keys()}
@@ -197,6 +215,11 @@ normalized_all_points = {k.strip().upper(): k for k in all_points.keys()}
 # 4. SIDEBAR & ĐỊA ĐIỂM
 # -------------------------------------------------------------
 st.sidebar.header("Make by BangNC13")
+
+# Hiển thị thông báo vị trí GPS Realtime hiện tại
+st.sidebar.info(
+    f"📍 **Vị trí GPS điện thoại:**\n`Lat: {curr_lat:.5f}, Lon: {curr_lon:.5f}`"
+)
 
 search_query = st.sidebar.text_input(
     "Nhập điểm cuối hành trình (nếu muốn)", placeholder="Chợ Tam Cờ..."
@@ -257,7 +280,7 @@ final_selected_names = list(set(selected_from_list + excel_points))
 
 st.sidebar.markdown("---")
 show_labels = st.sidebar.checkbox("🏷️ Hiện tên điểm (Label)", value=True)
-show_route_line = st.sidebar.checkbox("MW Hiện đường vẽ lộ trình", value=True)
+show_route_line = st.sidebar.checkbox("🛣️ Hiện đường vẽ lộ trình", value=True)
 
 if st.sidebar.button("🔄 Làm mới bản đồ"):
     st.session_state.calculated_route = None
@@ -266,7 +289,7 @@ if st.sidebar.button("🔄 Làm mới bản đồ"):
 
 
 # -------------------------------------------------------------
-# 5. THUẬT TOÁN BÁM ĐƯỜNG XE MÁY CHUẨN OSRM SMART
+# 5. THUẬT TOÁN TỐI ƯU LỘ TRÌNH TỪ ĐIỂM GPS REALTIME
 # -------------------------------------------------------------
 def haversine_distance(lat1, lon1, lat2, lon2):
     R = 6371.0
@@ -376,8 +399,10 @@ if st.sidebar.button("🚀 Lộ trình"):
             "Vui lòng chọn điểm di chuyển hoặc nhập Điểm Kết Thúc!"
         )
     else:
-        with st.spinner("Đang tối ưu bám đường xe máy..."):
+        with st.spinner("Đang tính toán từ vị trí GPS Realtime của bạn..."):
+            # Lấy tọa độ GPS realtime mới nhất từ điện thoại
             gps_start = (curr_lat, curr_lon)
+
             pts = [
                 {
                     "name": name,
@@ -409,12 +434,15 @@ if st.sidebar.button("🚀 Lộ trình"):
 def build_map(center):
     m = folium.Map(
         location=center,
-        zoom_start=14,
+        zoom_start=15,
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         attr="Google Maps",
     )
+    # Nút định vị vị trí người dùng trực tiếp trên bản đồ
     LocateControl(
-        auto_start=False, flyTo=True, strings={"title": "Vị trí của tôi"}
+        auto_start=False,
+        flyTo=True,
+        strings={"title": "Định vị vị trí hiện tại"},
     ).add_to(m)
     return m
 
@@ -432,9 +460,12 @@ if st.session_state.calculated_route and st.session_state.route_cache:
     st.sidebar.success(f"📊 Tổng quãng đường xe máy: **~ {real_dist:.2f} km**")
 
     m = build_map([s_lat, s_lon])
+
+    # Đánh dấu Vị trí GPS Realtime (Điểm bắt đầu)
     folium.Marker(
         [s_lat, s_lon],
-        popup="Xuất phát",
+        popup="🟢 Xuất phát (Vị trí GPS thực tế)",
+        tooltip="Vị trí hiện tại của bạn",
         icon=folium.Icon(color="green", icon="user", prefix="fa"),
     ).add_to(m)
 
@@ -484,7 +515,7 @@ else:
     m_default = build_map([curr_lat, curr_lon])
     folium.Marker(
         [curr_lat, curr_lon],
-        popup="Vị trí hiện tại",
+        popup="🟢 Vị trí hiện tại của bạn",
         icon=folium.Icon(color="green", icon="user", prefix="fa"),
     ).add_to(m_default)
     st_folium(
