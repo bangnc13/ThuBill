@@ -1,8 +1,8 @@
-from concurrent.futures import ThreadPoolExecutor
 import glob
 import json
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor
 import folium
 from folium.plugins import LocateControl
 import pandas as pd
@@ -91,29 +91,43 @@ curr_lon = st.session_state.user_gps["lon"]
 
 
 # -------------------------------------------------------------
-# 3. LOAD DỮ LIỆU TỪ TẤT CẢ FILE .JSON IN FOLDER
+# 3. LOAD TOÀN BỘ CÁC FILE JSON (QUÉT SÂU & MỞ RỘNG MẪU LỌC TQGP)
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_all_json_files():
     points = {}
-    json_files = glob.glob("*.json")  # Tìm tất cả các file có đuôi .json
+    # Quét tất cả file .json ở thư mục hiện tại và các thư mục con
+    json_files = glob.glob("**/*.json", recursive=True)
 
     for file_path in json_files:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            if isinstance(data, dict) and "features" in data:
-                for feature in data.get("features", []):
-                    if feature.get("geometry", {}).get("type") == "Point":
-                        coords = feature["geometry"]["coordinates"]
-                        for val in feature.get("properties", {}).values():
-                            val_str = str(val).strip()
-                            if "TQGP0" in val_str.upper():
-                                points[val_str] = {
-                                    "lat": coords[1],
-                                    "lon": coords[0],
-                                }
+            # Trường hợp 1: Chuẩn GeoJSON FeatureCollection
+            features = []
+            if isinstance(data, dict):
+                if "features" in data:
+                    features = data["features"]
+                elif data.get("type") == "Feature":
+                    features = [data]
+
+            for feature in features:
+                geom = feature.get("geometry", {})
+                props = feature.get("properties", {})
+
+                if geom.get("type") == "Point" and "coordinates" in geom:
+                    coords = geom["coordinates"]
+                    # Lấy latitude và longitude (GeoJSON thường lưu [lon, lat])
+                    lon, lat = coords[0], coords[1]
+
+                    # Duyệt qua tất cả thuộc tính để tìm tên điểm chứa TQGP
+                    for val in props.values():
+                        val_str = str(val).strip()
+                        # Lọc bất kỳ điểm nào chứa cụm "TQGP" (không phân biệt hoa/thường, hỗ trợ TQGP, TQGP0, TQGP1,...)
+                        if "TQGP" in val_str.upper():
+                            points[val_str] = {"lat": lat, "lon": lon}
+
         except Exception:
             continue
 
@@ -127,7 +141,14 @@ unique_keys = sorted(list(all_points.keys()))
 # 4. SIDEBAR & ĐỊA ĐIỂM
 # -------------------------------------------------------------
 st.sidebar.header("Make by BangNC13")
-st.sidebar.info(f"📂 Đã tải {len(unique_keys)} điểm từ các file JSON.")
+
+# Hiển thị số lượng điểm quét được
+if len(unique_keys) > 0:
+    st.sidebar.success(f"📂 Đã tải thành công {len(unique_keys)} điểm TQGP.")
+else:
+    st.sidebar.error(
+        "⚠️ Chưa tìm thấy điểm TQGP nào trong các file JSON! Lấy mẫu dữ liệu mặc định..."
+    )
 
 api_key_input = st.sidebar.text_input(
     "🔑 Google API Key (Tùy chọn)", type="password"
@@ -158,7 +179,7 @@ if search_query:
 
 st.sidebar.header("📋 Chọn lộ trình di chuyển")
 selected_from_list = st.sidebar.multiselect(
-    "Chọn điểm TQGP0xx:", options=unique_keys
+    "Chọn điểm TQGP...:", options=unique_keys
 )
 uploaded_file = st.sidebar.file_uploader(
     "Hoặc Upload file Excel:", type=["xlsx", "xls"]
@@ -172,7 +193,7 @@ if uploaded_file:
         matched = [
             val.strip()
             for val in flat_series
-            if "TQGP0" in val.upper() and val.strip() in all_points
+            if "TQGP" in val.upper() and val.strip() in all_points
         ]
         excel_points.extend(matched)
         st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm từ Excel.")
@@ -299,7 +320,7 @@ if "route_cache" not in st.session_state:
 if st.sidebar.button("🚀 Lộ trình"):
     if not final_selected_names and not end_location:
         st.sidebar.warning(
-            "Vui lòng chọn điểm TQGP0xx hoặc nhập Điểm Kết Thúc!"
+            "Vui lòng chọn điểm TQGP... hoặc nhập Điểm Kết Thúc!"
         )
     else:
         with st.spinner("Đang tối ưu bám đường xe máy..."):
