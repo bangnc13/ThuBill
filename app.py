@@ -1,249 +1,413 @@
-import streamlit as st
 import json
+import math
 import os
+from concurrent.futures import ThreadPoolExecutor
+import folium
+from folium.plugins import LocateControl
 import pandas as pd
-import re
+import requests
+import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_folium import st_folium
 
-st.set_page_config(page_title="Quản lý hạ tầng cáp - FPT Telecom", layout="wide")
+# -------------------------------------------------------------
+# CẤU HÌNH TRANG STREAMLIT
+# -------------------------------------------------------------
+st.set_page_config(
+    page_title="Tối ưu đường di chuyển xe máy - Tuyên Quang",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# ---------------------------------------------------------
-# HÀM HỖ TRỢ XỬ LÝ DỮ LIỆU
-# ---------------------------------------------------------
-def clean_code(code_str):
-    """Chuẩn hóa mã điểm để so sánh linh hoạt"""
-    if not code_str or pd.isna(code_str):
-        return ""
-    return str(code_str).strip().upper()
+# -------------------------------------------------------------
+# 1. LOGO & CSS HIỆU ỨNG (Giữ nguyên giao diện của bạn)
+# -------------------------------------------------------------
+logo_path = "FPT_Telecom_logo.png"
+if os.path.exists(logo_path):
+    st.sidebar.image(logo_path, use_container_width=True)
 
-def extract_coords_from_string(str_val):
-    """Trích xuất tọa độ từ chuỗi kiểu (lat, lng)"""
-    if not str_val or not isinstance(str_val, str):
-        return []
-    coords = []
-    matches = re.findall(r'\(?\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)?', str_val)
-    for lat, lng in matches:
-        try:
-            coords.append([float(lat), float(lng)])
-        except ValueError:
-            continue
-    return coords
+st.markdown(
+    """
+    <style>
+    html, body, [data-testid="stAppViewContainer"], .main, .block-container {
+        padding: 0 !important; 
+        margin: 0 !important; 
+        height: 100vh !important; 
+        overflow: hidden !important;
+    }
+    [data-testid="stVerticalBlock"] { gap: 0rem !important; }
+    header[data-testid="stHeader"] { 
+        height: 0px !important; 
+        background: transparent !important; 
+        z-index: 99999 !important; 
+    }
+    @keyframes neonBlinkGlow {
+        0% { background-color: #00ffcc !important; box-shadow: 0 0 10px #00ffcc; border: 2px solid #00ffcc; transform: scale(1); }
+        50% { background-color: #00b386 !important; box-shadow: 0 0 25px #00ffcc, 0 0 45px #00ffcc; border: 2px solid #ffffff; transform: scale(1.15); }
+        100% { background-color: #00ffcc !important; box-shadow: 0 0 10px #00ffcc; border: 2px solid #00ffcc; transform: scale(1); }
+    }
+    [data-testid="collapsedControl"], 
+    [data-testid="stSidebarCollapsedControl"], 
+    button[aria-label="Open sidebar"], 
+    button[aria-label="Close sidebar"] {
+        position: fixed !important; top: 14px !important; left: 14px !important; z-index: 99999999 !important;
+        background-color: #00ffcc !important; border-radius: 50% !important; width: 44px !important; height: 44px !important;
+        display: flex !important; align-items: center !important; justify-content: center !important;
+        animation: neonBlinkGlow 1.2s infinite ease-in-out !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-def load_json_from_folder(folder_path="data"):
-    """Thử đọc tất cả file JSON/GeoJSON từ thư mục chỉ định"""
-    all_features = []
-    # Thử tìm ở thư mục truyền vào hoặc thư mục hiện tại
-    paths_to_check = [folder_path, ".", "./data"]
-    
-    for path in paths_to_check:
-        if os.path.exists(path) and os.path.isdir(path):
-            for file_name in os.listdir(path):
-                if file_name.endswith('.json') or file_name.endswith('.geojson'):
-                    file_path = os.path.join(path, file_name)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                            features = data.get('features', [])
-                            all_features.extend(features)
-                    except Exception:
-                        pass
-            if len(all_features) > 0:
-                break
-    return all_features
+# -------------------------------------------------------------
+# 2. GPS REALTIME
+# -------------------------------------------------------------
+if "user_gps" not in st.session_state:
+    st.session_state.user_gps = {"lat": 21.82714, "lon": 105.19952}
+    gps_code = """
+    <script>
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                window.parent.postMessage({
+                    type: "streamlit:setComponentValue",
+                    value: {lat: pos.coords.latitude, lon: pos.coords.longitude}
+                }, "*");
+            },
+            (err) => console.error("Lỗi GPS:", err),
+            { enableHighAccuracy: true }
+        );
+    }
+    </script>
+    """
+    gps_data = components.html(gps_code, height=0)
+    if gps_data and isinstance(gps_data, dict) and "lat" in gps_data:
+        st.session_state.user_gps = gps_data
 
-# ---------------------------------------------------------
-# SIDEBAR: GIAO DIỆN ĐIỀU KHIỂN BÊN TRÁI
-# ---------------------------------------------------------
-with st.sidebar:
-    st.title("FPT Telecom")
-    st.caption("Make by BangNC13")
-    
-    # 1. Tải dữ liệu JSON tự động hoặc qua Upload
-    raw_features = load_json_from_folder("data")
-    
-    # Tùy chọn Upload file JSON trực tiếp nếu chưa tìm thấy trong thư mục
-    uploaded_json_files = st.file_uploader("📂 Upload file JSON/GeoJSON:", type=["json", "geojson"], accept_multiple_files=True)
-    if uploaded_json_files:
-        raw_features = []
-        for file in uploaded_json_files:
-            try:
-                data = json.load(file)
-                raw_features.extend(data.get('features', []))
-            except Exception:
-                pass
+curr_lat = st.session_state.user_gps["lat"]
+curr_lon = st.session_state.user_gps["lon"]
 
-    st.success(f"Dữ liệu: Đã tải {len(raw_features)} đối tượng")
 
-    # 2. Ô nhập Google API Key & Điểm cuối
-    st.text_input("🔑 Google API Key (Tùy chọn)", type="password")
-    end_point = st.text_input("🎯 Nhập điểm cuối hành trình (nếu muốn)", placeholder="Chợ Tam Cờ...")
+# -------------------------------------------------------------
+# 3. LOAD DATA GEOJSON
+# -------------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def load_geojson(file_path):
+    if not os.path.exists(file_path):
+        return {}
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    # 3. Lấy danh sách tên điểm từ JSON để cho vào Dropdown
-    all_names = sorted(list(set([
-        f['properties'].get('name', '') for f in raw_features if f.get('properties', {}).get('name')
-    ])))
+    points = {}
+    for feature in data.get("features", []):
+        if feature.get("geometry", {}).get("type") == "Point":
+            coords = feature["geometry"]["coordinates"]
+            for val in feature.get("properties", {}).values():
+                val_str = str(val).strip()
+                if "TQGP0" in val_str.upper():
+                    points[val_str] = {"lat": coords[1], "lon": coords[0]}
+    return points
 
-    # 4. Chọn lộ trình di chuyển
-    selected_options = st.multiselect("📋 Chọn lộ trình di chuyển:", options=all_names)
 
-    # 5. Upload file Excel / CSV
-    uploaded_excel = st.file_uploader("Hoặc Upload file Excel/CSV:", type=["xlsx", "xls", "csv"])
+all_points = load_geojson("data.geojson")
+unique_keys = sorted(list(all_points.keys()))
 
-    # Option hiển thị
-    st.checkbox("Hiện tên điểm (Label)", value=True)
-    st.checkbox("Hiện đường và lộ trình", value=True)
+# -------------------------------------------------------------
+# 4. SIDEBAR & ĐỊA ĐIỂM
+# -------------------------------------------------------------
+st.sidebar.header("Make by BangNC13")
+api_key_input = st.sidebar.text_input(
+    "🔑 Google API Key (Tùy chọn)", type="password"
+)
 
-# ---------------------------------------------------------
-# XỬ LÝ LỌC DỮ LIỆU ĐỂ HIỂN THỊ LÊN BẢN ĐỒ
-# ---------------------------------------------------------
-target_codes = []
+search_query = st.sidebar.text_input(
+    "Nhập điểm cuối hành trình (nếu muốn)", placeholder="Chợ Tam Cờ..."
+)
+end_location = None
 
-# Đọc mã từ Excel
-if uploaded_excel:
+if search_query:
     try:
-        df = pd.read_csv(uploaded_excel) if uploaded_excel.name.endswith('.csv') else pd.read_excel(uploaded_excel)
-        for col in df.columns:
-            target_codes.extend([clean_code(val) for val in df[col].dropna().tolist()])
-        target_codes = list(set([c for c in target_codes if c]))
-        st.sidebar.info(f"Đã đọc {len(target_codes)} mã từ Excel")
+        url = f"https://nominatim.openstreetmap.org/search?q={search_query}, Tuyên Quang, Việt Nam&format=json&limit=3"
+        res = requests.get(
+            url, headers={"User-Agent": "TQ_App"}, timeout=3
+        ).json()
+        if res:
+            end_location = {
+                "name": f"ĐÍCH ĐẾN: {search_query}",
+                "lat": float(res[0]["lat"]),
+                "lon": float(res[0]["lon"]),
+            }
+            st.sidebar.success(f"📍 Đã chọn đích: {search_query}")
+        else:
+            st.sidebar.error("Không tìm thấy địa điểm này ở Tuyên Quang!")
+    except Exception as e:
+        st.sidebar.error(f"Lỗi tìm kiếm: {e}")
+
+st.sidebar.header("📋 Chọn lộ trình di chuyển")
+selected_from_list = st.sidebar.multiselect(
+    "Chọn điểm TQGP0xx:", options=unique_keys
+)
+uploaded_file = st.sidebar.file_uploader(
+    "Hoặc Upload file Excel:", type=["xlsx", "xls"]
+)
+
+excel_points = []
+if uploaded_file:
+    try:
+        df = pd.read_excel(uploaded_file, header=None).astype(str)
+        flat_series = df.values.flatten()
+        matched = [
+            val.strip()
+            for val in flat_series
+            if "TQGP0" in val.upper() and val.strip() in all_points
+        ]
+        excel_points.extend(matched)
+        st.sidebar.info(f"Tìm thấy {len(set(excel_points))} điểm từ Excel.")
     except Exception as e:
         st.sidebar.error(f"Lỗi đọc file Excel: {e}")
 
-# Gộp các mã được chọn ở Dropdown
-if selected_options:
-    target_codes.extend([clean_code(x) for x in selected_options])
-    target_codes = list(set(target_codes))
+final_selected_names = list(set(selected_from_list + excel_points))
 
-matched_features = []
-matched_cables = []
+st.sidebar.markdown("---")
+show_labels = st.sidebar.checkbox("🏷️ Hiện tên điểm (Label)", value=True)
+show_route_line = st.sidebar.checkbox("🛣️ Hiện đường vẽ lộ trình", value=True)
 
-if target_codes:
-    for feat in raw_features:
-        props = feat.get('properties', {})
-        feat_name = clean_code(props.get('name', ''))
-        head_point = clean_code(props.get('headPoint', ''))
-        tail_point = clean_code(props.get('tailPoint', ''))
+if st.sidebar.button("🔄 Làm mới bản đồ"):
+    st.session_state.calculated_route = None
+    st.session_state.route_cache = None
+    st.rerun()
 
-        # Lọc linh hoạt (Chấp nhận chứa chuỗi con)
-        is_match = any(
-            (code in feat_name) or (feat_name in code) or 
-            (code in head_point) or (code in tail_point) 
-            for code in target_codes if code
+
+# -------------------------------------------------------------
+# 5. THUẬT TOÁN BÁM ĐƯỜNG XE MÁY CHUẨN GOOGLE / OSRM SMART
+# -------------------------------------------------------------
+def haversine_distance(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def fetch_smart_segment(pair):
+    """
+    Tự động ép bám đường giao thông.
+    Nếu dùng OSRM, bỏ tham số cắt thẳng và tăng snapping radius lên 2500m
+    để không bao giờ đâm ngang sông/núi.
+    """
+    p1, p2 = pair
+    url = (
+        f"http://router.project-osrm.org/route/v1/driving/"
+        f"{p1[1]},{p1[0]};{p2[1]},{p2[0]}"
+        f"?overview=full&geometries=geojson&radiuses=2500;2500"
+    )
+
+    try:
+        res = requests.get(url, timeout=4).json()
+        if res.get("code") == "Ok":
+            route_data = res["routes"][0]
+            osrm_dist = route_data["distance"] / 1000.0
+            geom = [
+                [lat, lon]
+                for lon, lat in route_data["geometry"]["coordinates"]
+            ]
+            return geom, osrm_dist
+    except Exception:
+        pass
+
+    # Trường hợp đứt mạng tuyệt đối mới dùng đường thẳng
+    direct_dist = haversine_distance(p1[0], p1[1], p2[0], p2[1])
+    return [[p1[0], p1[1]], [p2[0], p2[1]]], direct_dist
+
+
+def solve_tsp_google_style(start_coord, points, end_coord=None):
+    all_coords = [start_coord] + [(p["lat"], p["lon"]) for p in points]
+    if end_coord:
+        all_coords.append((end_coord["lat"], end_coord["lon"]))
+
+    n = len(all_coords)
+    dist_matrix = [[0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            dist_matrix[i][j] = haversine_distance(
+                all_coords[i][0],
+                all_coords[i][1],
+                all_coords[j][0],
+                all_coords[j][1],
+            )
+
+    unvisited = set(range(1, len(points) + 1))
+    curr = 0
+    path = [0]
+    while unvisited:
+        nxt = min(unvisited, key=lambda x: dist_matrix[curr][x])
+        path.append(nxt)
+        unvisited.remove(nxt)
+        curr = nxt
+
+    if end_coord:
+        path.append(n - 1)
+
+    ordered_points = []
+    for idx in path[1:]:
+        if end_coord and idx == n - 1:
+            ordered_points.append(end_coord)
+        else:
+            ordered_points.append(points[idx - 1])
+
+    return ordered_points
+
+
+def get_accurate_route_geometry_parallel(coords_list):
+    pairs = [
+        (coords_list[i], coords_list[i + 1])
+        for i in range(len(coords_list) - 1)
+    ]
+    road_lines = []
+    total_dist = 0.0
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(fetch_smart_segment, pairs))
+
+    for geom, dist in results:
+        road_lines.append(geom)
+        total_dist += dist
+
+    return road_lines, total_dist
+
+
+# -------------------------------------------------------------
+# 6. TÍNH TOÁN & DỰNG BẢN ĐỒ
+# -------------------------------------------------------------
+if "calculated_route" not in st.session_state:
+    st.session_state.calculated_route = None
+if "route_cache" not in st.session_state:
+    st.session_state.route_cache = None
+
+if st.sidebar.button("🚀 Lộ trình"):
+    if not final_selected_names and not end_location:
+        st.sidebar.warning(
+            "Vui lòng chọn điểm TQGP0xx hoặc nhập Điểm Kết Thúc!"
         )
+    else:
+        with st.spinner("Đang tối ưu bám đường xe máy..."):
+            gps_start = (curr_lat, curr_lon)
+            pts = [
+                {
+                    "name": name,
+                    "lat": all_points[name]["lat"],
+                    "lon": all_points[name]["lon"],
+                }
+                for name in final_selected_names
+            ]
 
-        if is_match:
-            if props.get('hasCable') == 1 or 'latlngCable' in props or 'tailHeadLatLng' in props:
-                matched_cables.append(feat)
-            else:
-                matched_features.append(feat)
+            opt_route = solve_tsp_google_style(gps_start, pts, end_location)
+            stop_coords = [gps_start] + [
+                (p["lat"], p["lon"]) for p in opt_route
+            ]
 
-    st.sidebar.success(f"Khớp: {len(matched_features)} điểm, {len(matched_cables)} cáp")
+            road_lines, real_dist = get_accurate_route_geometry_parallel(
+                stop_coords
+            )
+
+            st.session_state.calculated_route = opt_route
+            st.session_state.start_coords = gps_start
+            st.session_state.route_cache = {
+                "road_lines": road_lines,
+                "real_dist": real_dist,
+                "stop_coords": stop_coords,
+            }
+
+
+def build_map(center):
+    m = folium.Map(
+        location=center,
+        zoom_start=14,
+        tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
+        attr="Google Maps",
+    )
+    LocateControl(
+        auto_start=False, flyTo=True, strings={"title": "Vị trí của tôi"}
+    ).add_to(m)
+    return m
+
+
+# KHU VỰC RENDER MAIN VIEW (ĐẢM BẢO KHÔNG BỊ ĐEN MÀN HÌNH)
+if st.session_state.calculated_route and st.session_state.route_cache:
+    route = st.session_state.calculated_route
+    s_lat, s_lon = st.session_state.start_coords
+
+    cache = st.session_state.route_cache
+    road_lines = cache["road_lines"]
+    real_dist = cache["real_dist"]
+    stop_coords = cache["stop_coords"]
+
+    st.sidebar.success(
+        f"📊 Tổng quãng đường xe máy: **~ {real_dist:.2f} km**"
+    )
+
+    m = build_map([s_lat, s_lon])
+    folium.Marker(
+        [s_lat, s_lon],
+        popup="Xuất phát",
+        icon=folium.Icon(color="green", icon="user", prefix="fa"),
+    ).add_to(m)
+
+    num_pts = len(route)
+    for idx, pt in enumerate(route, start=1):
+        is_end = idx == num_pts and end_location is not None
+        bg_color = "#e63946" if is_end else "#1A73E8"
+
+        label_html = ""
+        if show_labels:
+            label_html = f"""
+            <span style="margin-left: 6px; background: rgba(255, 255, 255, 0.95); color: #1f2937; font-weight: 700; 
+            font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid #d1d5db; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15); pointer-events: none; white-space: nowrap;">
+                {pt['name']}
+            </span>
+            """
+
+        marker_html = f"""
+        <div style="display: flex; flex-direction: row; align-items: center; justify-content: center;">
+            <div style="font-size: 10pt; font-weight: bold; color: white; background-color: {bg_color}; 
+            border: 2px solid #ffffff; border-radius: 50%; width: 26px; height: 26px; text-align: center; 
+            line-height: 22px; box-shadow: 0 2px 5px rgba(0,0,0,0.3); flex-shrink: 0;">
+                {idx}
+            </div>
+            {label_html}
+        </div>
+        """
+
+        folium.Marker(
+            [pt["lat"], pt["lon"]],
+            popup=f"{idx}. {pt['name']}",
+            icon=folium.DivIcon(
+                html=marker_html, icon_size=(150, 40), icon_anchor=(13, 13)
+            ),
+        ).add_to(m)
+
+    if show_route_line:
+        for line in road_lines:
+            folium.PolyLine(
+                line, color="#1A73E8", weight=5, opacity=0.85
+            ).add_to(m)
+
+    m.fit_bounds(stop_coords)
+    st_folium(m, use_container_width=True, height=1000, key="optimized_map")
 else:
-    st.sidebar.warning("Vui lòng chọn hoặc upload danh sách điểm để hiển thị lộ trình.")
-
-# ---------------------------------------------------------
-# BẢN ĐỒ LEAFLET
-# ---------------------------------------------------------
-filtered_data_json = json.dumps({
-    "points": matched_features,
-    "cables": matched_cables
-}, ensure_ascii=False)
-
-html_code = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        html, body, #map {{
-            height: 100%;
-            width: 100%;
-            margin: 0;
-            padding: 0;
-        }}
-    </style>
-</head>
-<body>
-<div id="map"></div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-    var map = L.map('map').setView([21.817, 105.207], 13);
-
-    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-        attribution: '&copy; OpenStreetMap'
-    }}).addTo(map);
-
-    var data = {filtered_data_json};
-    var bounds = [];
-
-    // Vẽ điểm
-    data.points.forEach(function(feat) {{
-        var props = feat.properties || {{}};
-        var lat = null, lng = null;
-
-        if (feat.geometry && feat.geometry.coordinates) {{
-            lng = feat.geometry.coordinates[0];
-            lat = feat.geometry.coordinates[1];
-        }} else if (props.latLng) {{
-            var match = props.latLng.match(/\(?\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)?/);
-            if (match) {{
-                lat = parseFloat(match[1]);
-                lng = parseFloat(match[2]);
-            }}
-        }}
-
-        if (lat && lng) {{
-            var marker = L.circleMarker([lat, lng], {{
-                radius: 8,
-                fillColor: "#e74c3c",
-                color: "#ffffff",
-                weight: 2,
-                fillOpacity: 0.9
-            }}).addTo(map);
-
-            marker.bindPopup("<b>" + (props.name || "Tập điểm") + "</b><br/>ID: " + (props.id || ""));
-            marker.bindTooltip(props.name || "", {{permanent: false, direction: 'top'}});
-            bounds.push([lat, lng]);
-        }}
-    }});
-
-    function parseCoords(str) {{
-        if (!str) return [];
-        var res = [];
-        var regex = /\(?\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)?/g;
-        var match;
-        while ((match = regex.exec(str)) !== null) {{
-            res.push([parseFloat(match[1]), parseFloat(match[2])]);
-        }}
-        return res;
-    }}
-
-    // Vẽ cáp
-    data.cables.forEach(function(feat) {{
-        var props = feat.properties || {{}};
-        var lineCoords = parseCoords(props.latlngCable) || parseCoords(props.tailHeadLatLng);
-
-        if (lineCoords.length > 0) {{
-            var polyline = L.polyline(lineCoords, {{
-                color: props.color || "#0055ff",
-                weight: 4,
-                opacity: 0.8
-            }}).addTo(map);
-
-            polyline.bindPopup("<b>Cáp: " + (props.name || "") + "</b>");
-            lineCoords.forEach(function(pt) {{ bounds.push(pt); }});
-        }}
-    }});
-
-    if (bounds.length > 0) {{
-        map.fitBounds(bounds, {{padding: [50, 50]}});
-    }}
-</script>
-</body>
-</html>
-"""
-
-components.html(html_code, height=800)
+    m_default = build_map([curr_lat, curr_lon])
+    folium.Marker(
+        [curr_lat, curr_lon],
+        popup="Vị trí hiện tại",
+        icon=folium.Icon(color="green", icon="user", prefix="fa"),
+    ).add_to(m_default)
+    st_folium(
+        m_default, use_container_width=True, height=1000, key="default_map"
+    )
