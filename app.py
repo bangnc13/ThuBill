@@ -311,6 +311,7 @@ def solve_tsp_google_style(start_coord, points, end_coord=None):
         all_coords.append((end_coord["lat"], end_coord["lon"]))
 
     n = len(all_coords)
+    # Khởi tạo ma trận khoảng cách
     dist_matrix = [[0] * n for _ in range(n)]
     for i in range(n):
         for j in range(n):
@@ -321,6 +322,7 @@ def solve_tsp_google_style(start_coord, points, end_coord=None):
                 all_coords[j][1],
             )
 
+    # 1. Tìm lộ trình cơ sở bằng thuật toán Tham lam (Nearest Neighbor)
     unvisited = set(range(1, len(points) + 1))
     curr = 0
     path = [0]
@@ -333,6 +335,26 @@ def solve_tsp_google_style(start_coord, points, end_coord=None):
     if end_coord:
         path.append(n - 1)
 
+    # 2. Tối ưu lộ trình bằng thuật toán 2-opt (Gỡ đường chéo và giao cắt)
+    def calculate_total_distance(tour):
+        return sum(dist_matrix[tour[k]][tour[k+1]] for k in range(len(tour)-1))
+
+    improved = True
+    max_j = len(path) - 1 if end_coord else len(path)
+
+    while improved:
+        improved = False
+        for i in range(1, max_j - 1):
+            for j in range(i + 2, max_j + 1):
+                # Đảo ngược thứ tự các điểm dừng từ i đến j-1 để thử gỡ rối
+                new_path = path[:i] + path[i:j][::-1] + path[j:]
+                
+                # Cập nhật lộ trình nếu tổng quãng đường mới ngắn hơn
+                if calculate_total_distance(new_path) < calculate_total_distance(path):
+                    path = new_path
+                    improved = True
+
+    # 3. Trả về danh sách điểm đã sắp xếp tối ưu
     ordered_points = []
     for idx in path[1:]:
         if end_coord and idx == n - 1:
