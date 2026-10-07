@@ -311,6 +311,7 @@ def solve_tsp_google_style(start_coord, points, end_coord=None):
         all_coords.append((end_coord["lat"], end_coord["lon"]))
 
     n = len(all_coords)
+    # Khởi tạo ma trận khoảng cách
     dist_matrix = [[0] * n for _ in range(n)]
     for i in range(n):
         for j in range(n):
@@ -321,6 +322,7 @@ def solve_tsp_google_style(start_coord, points, end_coord=None):
                 all_coords[j][1],
             )
 
+    # 1. Tìm lộ trình cơ sở bằng thuật toán Tham lam (Nearest Neighbor)
     unvisited = set(range(1, len(points) + 1))
     curr = 0
     path = [0]
@@ -333,6 +335,27 @@ def solve_tsp_google_style(start_coord, points, end_coord=None):
     if end_coord:
         path.append(n - 1)
 
+    # 2. Tối ưu lộ trình bằng thuật toán 2-opt (Gỡ đường chéo)
+    def calculate_total_distance(tour):
+        return sum(dist_matrix[tour[k]][tour[k+1]] for k in range(len(tour)-1))
+
+    improved = True
+    # Nếu có điểm kết thúc, cố định điểm đó bằng cách giới hạn phạm vi hoán đổi
+    max_j = len(path) - 1 if end_coord else len(path)
+
+    while improved:
+        improved = False
+        for i in range(1, max_j - 1):
+            for j in range(i + 2, max_j + 1):
+                # Đảo ngược thứ tự các điểm từ i đến j-1
+                new_path = path[:i] + path[i:j][::-1] + path[j:]
+                
+                # Cập nhật lộ trình nếu khoảng cách mới ngắn hơn
+                if calculate_total_distance(new_path) < calculate_total_distance(path):
+                    path = new_path
+                    improved = True
+
+    # 3. Trả về danh sách điểm đã được sắp xếp chuẩn
     ordered_points = []
     for idx in path[1:]:
         if end_coord and idx == n - 1:
@@ -427,74 +450,4 @@ def build_map(center):
 # RENDER BẢN ĐỒ MAIN VIEW
 if st.session_state.calculated_route and st.session_state.route_cache:
     route = st.session_state.calculated_route
-    s_lat, s_lon = st.session_state.start_coords
-
-    cache = st.session_state.route_cache
-    road_lines = cache["road_lines"]
-    real_dist = cache["real_dist"]
-    stop_coords = cache["stop_coords"]
-
-    st.sidebar.success(f"📊 Tổng quãng đường xe máy: **~ {real_dist:.2f} km**")
-
-    m = build_map([s_lat, s_lon])
-
-    # Điểm Xuất Phát Bắt Buộc là GPS Realtime
-    folium.Marker(
-        [s_lat, s_lon],
-        popup=f"🟢 Xuất phát: Vị trí GPS Thực tế ({s_lat:.5f}, {s_lon:.5f})",
-        tooltip="Vị trí xuất phát của bạn",
-        icon=folium.Icon(color="green", icon="user", prefix="fa"),
-    ).add_to(m)
-
-    num_pts = len(route)
-    for idx, pt in enumerate(route, start=1):
-        is_end = idx == num_pts and end_location is not None
-        bg_color = "#e63946" if is_end else "#1A73E8"
-
-        label_html = ""
-        if show_labels:
-            label_html = f"""
-            <span style="margin-left: 6px; background: rgba(255, 255, 255, 0.95); color: #1f2937; font-weight: 700; 
-            font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid #d1d5db; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.15); pointer-events: none; white-space: nowrap;">
-                {pt['name']}
-            </span>
-            """
-
-        marker_html = f"""
-        <div style="display: flex; flex-direction: row; align-items: center; justify-content: center;">
-            <div style="font-size: 10pt; font-weight: bold; color: white; background-color: {bg_color}; 
-            border: 2px solid #ffffff; border-radius: 50%; width: 26px; height: 26px; text-align: center; 
-            line-height: 22px; box-shadow: 0 2px 5px rgba(0,0,0,0.3); flex-shrink: 0;">
-                {idx}
-            </div>
-            {label_html}
-        </div>
-        """
-
-        folium.Marker(
-            [pt["lat"], pt["lon"]],
-            popup=f"{idx}. {pt['name']}",
-            icon=folium.DivIcon(
-                html=marker_html, icon_size=(150, 40), icon_anchor=(13, 13)
-            ),
-        ).add_to(m)
-
-    if show_route_line:
-        for line in road_lines:
-            folium.PolyLine(
-                line, color="#1A73E8", weight=5, opacity=0.85
-            ).add_to(m)
-
-    m.fit_bounds(stop_coords)
-    st_folium(m, use_container_width=True, height=1000, key="optimized_map")
-else:
-    m_default = build_map([curr_lat, curr_lon])
-    folium.Marker(
-        [curr_lat, curr_lon],
-        popup=f"🟢 Vị trí GPS hiện tại: {curr_lat:.5f}, {curr_lon:.5f}",
-        icon=folium.Icon(color="green", icon="user", prefix="fa"),
-    ).add_to(m_default)
-    st_folium(
-        m_default, use_container_width=True, height=1000, key="default_map"
-    )
+    s_lat, s_lon =
