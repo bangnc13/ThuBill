@@ -12,6 +12,18 @@ html,body,#m{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI"
 @keyframes pl{0%{transform:scale(1);opacity:.75}100%{transform:scale(4.4);opacity:0}}
 .hud{background:#0f2a26e6;color:#fff;padding:8px 12px;border-radius:12px;font:600 12.5px/1.35 system-ui;box-shadow:0 4px 14px #0006;backdrop-filter:blur(4px)}
 .btn{display:block;width:34px;height:34px;line-height:34px;text-align:center;font-size:18px;background:#fff;color:#0f766e;border-radius:8px;box-shadow:0 1px 5px #0006;cursor:pointer;text-decoration:none;margin-top:8px}
+.cw{position:relative;width:68px;height:68px;border-radius:50%;background:#0f2a26d9;border:2px solid #fff;box-shadow:0 2px 10px #0007;cursor:pointer;margin:0 auto}
+.cw .dial{position:absolute;inset:0;transition:transform .15s linear}
+.cw b{position:absolute;color:#fff;font:700 11px/1 system-ui}
+.cw .n{top:4px;left:50%;transform:translateX(-50%);color:#f87171;font-size:13px}
+.cw .s{bottom:4px;left:50%;transform:translateX(-50%)}
+.cw .e{right:6px;top:50%;transform:translateY(-50%)}
+.cw .w{left:6px;top:50%;transform:translateY(-50%)}
+.cw::after{content:"";position:absolute;inset:17px;border-radius:50%;border:1px dashed #ffffff55}
+.cw .ptr{position:absolute;left:50%;top:-11px;margin-left:-6px;border:6px solid transparent;border-top:0;border-bottom:10px solid #f97316}
+.cw.need{animation:nd 1.6s ease-in-out infinite}
+@keyframes nd{50%{box-shadow:0 0 0 6px #f9731666}}
+.dg{margin:5px auto 0;text-align:center;background:#0f2a26d9;color:#fff;border-radius:8px;padding:2px 8px;font:600 11px/1.4 system-ui;white-space:nowrap;width:max-content}
 .btn.w{width:auto;padding:0 12px;font:700 13px/34px system-ui}
 </style></head><body><div id="m"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -20,7 +32,7 @@ const post=(t,d)=>parent.postMessage({isStreamlitMessage:true,type:t,...d},'*');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dm=(a,b)=>{const r=Math.PI/180,x=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lng-a.lng)*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
 
-const map=L.map('m',{zoomControl:false});L.control.zoom({position:'topright'}).addTo(map);
+const map=L.map('m',{zoomControl:false});
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map);
 map.setView([16,107.5],6);
 const layer=L.layerGroup().addTo(map);
@@ -49,20 +61,23 @@ const hud=L.control({position:'bottomright'});
 hud.onAdd=()=>{const d=L.DomUtil.create('div','hud');d.textContent='Đang chờ định vị…';return d};hud.addTo(map);
 const hudEl=hud.getContainer();
 const bar=L.control({position:'topright'});
-bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn w" id="cmp" style="display:none">🧭 Bật la bàn</a>';
+bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<div class="cw" id="cw" title="La bàn"><div class="dial" id="dial"><b class="n">N</b><b class="e">E</b><b class="s">S</b><b class="w">W</b></div><i class="ptr"></i></div><div class="dg" id="dg">La bàn</div><a class="btn" id="ctr" title="Về vị trí của tôi">◎</a>';
  L.DomEvent.disableClickPropagation(d);return d};bar.addTo(map);
+const dial=document.getElementById('dial'),dg=document.getElementById('dg');
+const card=h=>['Bắc','Đông Bắc','Đông','Đông Nam','Nam','Tây Nam','Tây','Tây Bắc'][Math.round(h/45)%8];
 document.getElementById('ctr').onclick=()=>{if(last)map.setView([last.lat,last.lng],Math.max(map.getZoom(),17))};
 
 // ---- Vị trí realtime + hướng (la bàn) ----
 let last=null,pub=null,mk=null,ring=null,cone=null,rot=null,hasCompass=false,hd=null;
 function hudText(){
  if(!last)return;
- hudEl.innerHTML='📍 '+last.lat.toFixed(5)+', '+last.lng.toFixed(5)+' · ±'+Math.round(last.acc)+' m'+(hd==null?'':'<br>🧭 '+Math.round(hd)+'°');
+ hudEl.innerHTML='📍 '+last.lat.toFixed(5)+', '+last.lng.toFixed(5)+' · ±'+Math.round(last.acc)+' m';
 }
 function setHeading(h){
  rot=rot==null?h:rot+((((h-(rot%360))+540)%360)-180)*0.3;
  hd=((rot%360)+360)%360;
  if(cone){cone.style.opacity=1;cone.style.transform='rotate('+rot+'deg)'}
+ dial.style.transform='rotate('+(-rot)+'deg)';dg.textContent=card(hd)+' '+Math.round(hd)+'°';
  hudText();
 }
 function onPos(p){
@@ -88,11 +103,11 @@ function onOri(e){
 function startCompass(){
  const D=window.DeviceOrientationEvent;
  if(D&&typeof D.requestPermission==='function'){
-  D.requestPermission().then(r=>{if(r==='granted'){addEventListener('deviceorientation',onOri,true);document.getElementById('cmp').style.display='none'}}).catch(()=>{});
+  D.requestPermission().then(r=>{if(r==='granted'){addEventListener('deviceorientation',onOri,true);document.getElementById('cw').classList.remove('need')}}).catch(()=>{});
  }else{addEventListener('deviceorientationabsolute',onOri,true);addEventListener('deviceorientation',onOri,true)}
 }
 if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermission==='function'){
- const b=document.getElementById('cmp');b.style.display='block';b.onclick=startCompass; // iOS cần chạm để cấp quyền
+ const w=document.getElementById('cw');w.classList.add('need');w.onclick=startCompass;dg.textContent='Chạm để bật'; // iOS cần chạm để cấp quyền
 }else startCompass();
 if(navigator.geolocation)navigator.geolocation.watchPosition(onPos,e=>{hudEl.textContent='Chưa có quyền định vị. Hãy cho phép vị trí cho trang này.'},{enableHighAccuracy:true,maximumAge:2000,timeout:20000});
 else hudEl.textContent='Thiết bị không hỗ trợ định vị.';
