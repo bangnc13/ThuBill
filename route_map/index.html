@@ -49,8 +49,12 @@ const hud=L.control({position:'bottomleft'});
 hud.onAdd=()=>{const d=L.DomUtil.create('div','hud');d.textContent='Đang chờ định vị…';return d};hud.addTo(map);
 const hudEl=hud.getContainer();
 const bar=L.control({position:'topleft'});
-bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn w" id="cmp" style="display:none">🧭 Bật la bàn</a>';
+bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="mnu" title="Mở/đóng menu" style="margin-top:0">☰</a><a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn w" id="cmp" style="display:none">🧭 Bật la bàn</a>';
  L.DomEvent.disableClickPropagation(d);return d};bar.addTo(map);
+document.getElementById('mnu').onclick=()=>{ // bấm nút mở/đóng menu của Streamlit (cùng origin)
+ try{for(const q of ['[data-testid="stExpandSidebarButton"]','[data-testid="collapsedControl"] button','[data-testid="collapsedControl"]','[data-testid="stSidebarCollapseButton"] button','[data-testid="stSidebarCollapseButton"]']){
+  const el=parent.document.querySelector(q);if(el){el.click();return}}}catch(e){}
+};
 document.getElementById('ctr').onclick=()=>{if(last)map.setView([last.lat,last.lng],Math.max(map.getZoom(),17))};
 
 // ---- Vị trí realtime + hướng (la bàn) ----
