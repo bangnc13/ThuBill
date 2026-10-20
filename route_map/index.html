@@ -13,7 +13,6 @@ html,body,#m{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI"
 @keyframes pl{0%{transform:scale(1);opacity:.75}100%{transform:scale(4.4);opacity:0}}
 .hud{background:#0f2a26e6;color:#fff;padding:8px 12px;border-radius:12px;font:600 12.5px/1.35 system-ui;box-shadow:0 4px 14px #0006;backdrop-filter:blur(4px)}
 .btn{display:block;width:34px;height:34px;line-height:34px;text-align:center;font-size:18px;background:#fff;color:#0f766e;border-radius:8px;box-shadow:0 1px 5px #0006;cursor:pointer;text-decoration:none;margin-top:8px}
-.btn.on{background:#0f766e;color:#fff}
 #rst{position:relative}
 #rst .nd{position:absolute;left:50%;top:50%;width:0;height:0;margin:-15px 0 0 -6px;transform-origin:6px 15px;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:15px solid #ef4444}
 #rst .nd::after{content:"";position:absolute;left:-6px;top:15px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:15px solid #94a3b8}
@@ -56,15 +55,12 @@ const hud=L.control({position:'bottomright'});
 hud.onAdd=()=>{const d=L.DomUtil.create('div','hud');d.textContent='Đang chờ định vị…';return d};hud.addTo(map);
 const hudEl=hud.getContainer();
 const bar=L.control({position:'topright'});
-bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn" id="hup" title="Bản đồ xoay theo hướng đang đi">🧭</a><a class="btn" id="rst" title="Về hướng Bắc" style="display:none"><i class="nd"></i></a>';
+bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn" id="rst" title="Về hướng Bắc" style="display:none"><i class="nd"></i></a>';
  L.DomEvent.disableClickPropagation(d);return d};bar.addTo(map);
-const hup=document.getElementById('hup'),rst=document.getElementById('rst'),nd=rst.querySelector('.nd');
-let headUp=false;
-if(!map.setBearing)hup.style.display='none';
-else{
+const rst=document.getElementById('rst'),nd=rst.querySelector('.nd');
+if(map.setBearing){
  map.on('rotate',()=>{const b=map.getBearing();rst.style.display=Math.abs(((b+180)%360)-180)>1?'block':'none';nd.style.transform='rotate('+(-b)+'deg)';applyBeam()});
- hup.onclick=()=>{headUp=!headUp;hup.classList.toggle('on',headUp);if(headUp&&hd!=null)map.setBearing(hd);else if(!headUp)map.setBearing(0)};
- rst.onclick=()=>{headUp=false;hup.classList.remove('on');map.setBearing(0)};
+ rst.onclick=()=>map.setBearing(0);
 }
 document.getElementById('ctr').onclick=()=>{if(last)map.setView([last.lat,last.lng],Math.max(map.getZoom(),17))};
 
@@ -78,7 +74,7 @@ function applyBeam(){if(cone&&rot!=null){cone.classList.add('on');cone.style.tra
 function setHeading(h){
  rot=rot==null?h:rot+((((h-(rot%360))+540)%360)-180)*0.3;
  hd=((rot%360)+360)%360;
- applyBeam();if(headUp&&map.setBearing&&Math.abs(((hd-map.getBearing()+540)%360)-180)>1)map.setBearing(hd);
+ applyBeam();
  hudText();
 }
 function onPos(p){
