@@ -20,7 +20,7 @@ const post=(t,d)=>parent.postMessage({isStreamlitMessage:true,type:t,...d},'*');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dm=(a,b)=>{const r=Math.PI/180,x=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lng-a.lng)*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
 
-const map=L.map('m');
+const map=L.map('m',{zoomControl:false});L.control.zoom({position:'topright'}).addTo(map);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map);
 map.setView([16,107.5],6);
 const layer=L.layerGroup().addTo(map);
@@ -38,17 +38,17 @@ function render(a){
  a.pts.forEach(p=>{all.push([p.lat,p.lng]);
   (p.l===''?L.circleMarker([p.lat,p.lng],{radius:7,color:'#fff',weight:2,fillColor:'#f97316',fillOpacity:1})
   :L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',iconSize:[26,26],html:'<div class="pin">'+esc(p.l)+'</div>'})})).bindTooltip(esc(p.n)).addTo(layer)});
- if(all.length>1){map.fitBounds(all,{padding:[60,60]});fitted=true}
+ if(all.length>1){map.fitBounds(all,{paddingTopLeft:[innerWidth>768?380:60,60],paddingBottomRight:[60,60]});fitted=true}
  else if(all.length){map.setView(all[0],16);fitted=true}
 }
 window.addEventListener('message',e=>{if(e.data&&e.data.type==='streamlit:render')render(e.data.args||{pts:[],line:[]})});
 post('streamlit:componentReady',{apiVersion:1});post('streamlit:setFrameHeight',{height:700});
 
 // ---- Giao diện phụ: bảng tọa độ + nút về vị trí ----
-const hud=L.control({position:'bottomleft'});
+const hud=L.control({position:'bottomright'});
 hud.onAdd=()=>{const d=L.DomUtil.create('div','hud');d.textContent='Đang chờ định vị…';return d};hud.addTo(map);
 const hudEl=hud.getContainer();
-const bar=L.control({position:'topleft'});
+const bar=L.control({position:'topright'});
 bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="mnu" title="Mở/đóng menu" style="margin-top:0">☰</a><a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn w" id="cmp" style="display:none">🧭 Bật la bàn</a>';
  L.DomEvent.disableClickPropagation(d);return d};bar.addTo(map);
 document.getElementById('mnu').onclick=()=>{ // bấm nút mở/đóng menu của Streamlit (cùng origin)
