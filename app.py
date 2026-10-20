@@ -121,8 +121,9 @@ CSS = """<style>
 [data-testid="stExpandSidebarButton"],[data-testid="collapsedControl"]{display:flex!important;visibility:visible!important;opacity:1!important;position:fixed!important;top:12px;left:12px;z-index:1000002!important;width:42px;height:42px;align-items:center;justify-content:center;border-radius:14px;background:linear-gradient(135deg,#0f766e,#14b8a6)!important;box-shadow:0 6px 16px #0f766e66}
 [data-testid="stExpandSidebarButton"] *,[data-testid="collapsedControl"] *{color:#fff!important;fill:#fff!important}
 [data-testid="stSidebarCollapseButton"],[data-testid="stSidebarCollapseButton"] button{opacity:1!important;visibility:visible!important}
-[data-testid="stSidebar"]{position:fixed!important;top:0;left:0;height:100vh;z-index:999;background:linear-gradient(180deg,rgba(243,250,248,.70),rgba(226,240,236,.70))!important;-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);border-right:1px solid rgba(255,255,255,.5)}
-[data-testid="stSidebarContent"],[data-testid="stSidebarUserContent"],[data-testid="stSidebarHeader"]{background:transparent!important}
+[data-testid="stSidebar"]{position:fixed!important;top:0!important;left:0!important;bottom:0!important;height:100vh!important;height:100dvh!important;z-index:999;background:linear-gradient(180deg,rgba(243,250,248,.70),rgba(226,240,236,.70))!important;-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);border-right:1px solid rgba(255,255,255,.5)}
+[data-testid="stSidebar"]>div,[data-testid="stSidebarContent"]{height:100%!important;background:transparent!important}
+[data-testid="stSidebarUserContent"],[data-testid="stSidebarHeader"]{background:transparent!important}
 .brand{display:flex;gap:12px;align-items:center;padding:16px;margin-bottom:10px;border-radius:18px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;box-shadow:0 8px 20px #0f766e40}
 .brand .logo{font-size:26px;width:46px;height:46px;border-radius:14px;background:#ffffff2b;display:grid;place-items:center}
 .brand .t{font-weight:700;font-size:19px;letter-spacing:-.01em}.brand .s{font-size:12.5px;opacity:.92}
