@@ -13,15 +13,21 @@ html,body,#m{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI"
 @keyframes pl{0%{transform:scale(1);opacity:.75}100%{transform:scale(4.4);opacity:0}}
 .hud{background:#0f2a26e6;color:#fff;padding:8px 12px;border-radius:12px;font:600 12.5px/1.35 system-ui;box-shadow:0 4px 14px #0006;backdrop-filter:blur(4px)}
 .btn{display:block;width:34px;height:34px;line-height:34px;text-align:center;font-size:18px;background:#fff;color:#0f766e;border-radius:8px;box-shadow:0 1px 5px #0006;cursor:pointer;text-decoration:none;margin-top:8px}
+.btn.on{background:#0f766e;color:#fff}
+#rst{position:relative}
+#rst .nd{position:absolute;left:50%;top:50%;width:0;height:0;margin:-15px 0 0 -6px;transform-origin:6px 15px;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:15px solid #ef4444}
+#rst .nd::after{content:"";position:absolute;left:-6px;top:15px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:15px solid #94a3b8}
 .btn.w{width:auto;padding:0 12px;font:700 13px/34px system-ui}
 </style></head><body><div id="m"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+<script>if(!L.Map.prototype.setBearing)document.write('<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"><\/script>')</script>
 <script>
 const post=(t,d)=>parent.postMessage({isStreamlitMessage:true,type:t,...d},'*');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dm=(a,b)=>{const r=Math.PI/180,x=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lng-a.lng)*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
 
-const map=L.map('m',{zoomControl:false});
+const map=L.map('m',{zoomControl:false,rotate:true,bearing:0,touchRotate:true,shiftKeyRotate:true,rotateControl:false});
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:21,maxNativeZoom:18,attribution:'Tiles © Esri'}).addTo(map);
 map.setView([16,107.5],6);
 const layer=L.layerGroup().addTo(map);
@@ -50,8 +56,16 @@ const hud=L.control({position:'bottomright'});
 hud.onAdd=()=>{const d=L.DomUtil.create('div','hud');d.textContent='Đang chờ định vị…';return d};hud.addTo(map);
 const hudEl=hud.getContainer();
 const bar=L.control({position:'topright'});
-bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a>';
+bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn" id="hup" title="Bản đồ xoay theo hướng đang đi">🧭</a><a class="btn" id="rst" title="Về hướng Bắc" style="display:none"><i class="nd"></i></a>';
  L.DomEvent.disableClickPropagation(d);return d};bar.addTo(map);
+const hup=document.getElementById('hup'),rst=document.getElementById('rst'),nd=rst.querySelector('.nd');
+let headUp=false;
+if(!map.setBearing)hup.style.display='none';
+else{
+ map.on('rotate',()=>{const b=map.getBearing();rst.style.display=Math.abs(((b+180)%360)-180)>1?'block':'none';nd.style.transform='rotate('+(-b)+'deg)';applyBeam()});
+ hup.onclick=()=>{headUp=!headUp;hup.classList.toggle('on',headUp);if(headUp&&hd!=null)map.setBearing(hd);else if(!headUp)map.setBearing(0)};
+ rst.onclick=()=>{headUp=false;hup.classList.remove('on');map.setBearing(0)};
+}
 document.getElementById('ctr').onclick=()=>{if(last)map.setView([last.lat,last.lng],Math.max(map.getZoom(),17))};
 
 // ---- Vị trí realtime + hướng (la bàn) ----
@@ -60,10 +74,11 @@ function hudText(){
  if(!last)return;
  hudEl.innerHTML='📍 '+last.lat.toFixed(5)+', '+last.lng.toFixed(5)+' · ±'+Math.round(last.acc)+' m'+'<br>'+(hd!=null?'🧭 Hướng '+Math.round(hd)+'°':needPerm?'Chạm bản đồ để bật hướng':sensorMsg);
 }
+function applyBeam(){if(cone&&rot!=null){cone.classList.add('on');cone.style.transform='rotate('+(rot-(map.getBearing?map.getBearing():0))+'deg)'}}
 function setHeading(h){
  rot=rot==null?h:rot+((((h-(rot%360))+540)%360)-180)*0.3;
  hd=((rot%360)+360)%360;
- if(cone){cone.classList.add('on');cone.style.transform='rotate('+rot+'deg)'}
+ applyBeam();if(headUp&&map.setBearing&&Math.abs(((hd-map.getBearing()+540)%360)-180)>1)map.setBearing(hd);
  hudText();
 }
 function onPos(p){
@@ -71,7 +86,7 @@ function onPos(p){
  if(!mk){
   mk=L.marker([last.lat,last.lng],{zIndexOffset:2000,interactive:false,icon:L.divIcon({className:'',iconSize:[120,120],html:'<div class="me"><div class="beam"></div><div class="pulse"></div><div class="dot"></div></div>'})}).addTo(map);
   ring=L.circle([last.lat,last.lng],{radius:last.acc,color:'#3b82f6',weight:1,fillColor:'#3b82f6',fillOpacity:.1,interactive:false}).addTo(map);
-  cone=mk.getElement().querySelector('.beam');
+  cone=mk.getElement().querySelector('.beam');applyBeam();
  }else{mk.setLatLng([last.lat,last.lng]);ring.setLatLng([last.lat,last.lng]).setRadius(last.acc)}
  if(!hasCompass&&c.heading!=null&&!isNaN(c.heading)&&c.speed>1)setHeading(c.heading);
  hudText();
