@@ -55,10 +55,10 @@ bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="c
 document.getElementById('ctr').onclick=()=>{if(last)map.setView([last.lat,last.lng],Math.max(map.getZoom(),17))};
 
 // ---- Vị trí realtime + hướng (la bàn) ----
-let needPerm=false,last=null,pub=null,mk=null,ring=null,cone=null,rot=null,hasCompass=false,hd=null;
+let needPerm=false,asking=false,gotAbs=false,lastRel=0,sensorMsg='Đang chờ cảm biến hướng…',last=null,pub=null,mk=null,ring=null,cone=null,rot=null,hasCompass=false,hd=null;
 function hudText(){
  if(!last)return;
- hudEl.innerHTML='📍 '+last.lat.toFixed(5)+', '+last.lng.toFixed(5)+' · ±'+Math.round(last.acc)+' m'+(needPerm?'<br>Chạm bản đồ để bật hướng':'');
+ hudEl.innerHTML='📍 '+last.lat.toFixed(5)+', '+last.lng.toFixed(5)+' · ±'+Math.round(last.acc)+' m'+'<br>'+(hd!=null?'🧭 Hướng '+Math.round(hd)+'°':needPerm?'Chạm bản đồ để bật hướng':sensorMsg);
 }
 function setHeading(h){
  rot=rot==null?h:rot+((((h-(rot%360))+540)%360)-180)*0.3;
@@ -80,21 +80,27 @@ function onPos(p){
   pub={...last};post('streamlit:setComponentValue',{value:{lat:last.lat,lon:last.lng,acc:last.acc},dataType:'json'});
  }
 }
+let t0=performance.now();
 function onOri(e){
- let h=e.webkitCompassHeading;
- if(h==null&&e.alpha!=null&&(e.absolute||e.type==='deviceorientationabsolute'))h=360-e.alpha;
+ let h=null;
+ if(e.webkitCompassHeading!=null&&!isNaN(e.webkitCompassHeading))h=e.webkitCompassHeading;           // iOS
+ else if(e.alpha!=null&&(e.absolute||e.type==='deviceorientationabsolute')){h=360-e.alpha;gotAbs=true} // Android Chrome
+ else if(e.alpha!=null){lastRel=360-e.alpha;if(!gotAbs&&performance.now()-t0>2500)h=lastRel}           // trình duyệt không có sự kiện tuyệt đối (vd. Firefox)
  if(h==null||isNaN(h))return;
- hasCompass=true;setHeading((h+((screen.orientation&&screen.orientation.angle)||0))%360);
+ hasCompass=true;
+ setHeading((h+((screen.orientation&&screen.orientation.angle)||0)+360)%360);
 }
 function startCompass(){
  const D=window.DeviceOrientationEvent;
  if(D&&typeof D.requestPermission==='function'){
-  D.requestPermission().then(r=>{if(r==='granted'){addEventListener('deviceorientation',onOri,true);needPerm=false;hudText()}}).catch(()=>{});
+  asking=true;
+  D.requestPermission().then(r=>{if(r==='granted'){addEventListener('deviceorientation',onOri,true);needPerm=false;hudText()}}).catch(()=>{}).finally(()=>{asking=false});
  }else{addEventListener('deviceorientationabsolute',onOri,true);addEventListener('deviceorientation',onOri,true)}
 }
 if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermission==='function'){
- needPerm=true;map.once('click',startCompass);document.getElementById('ctr').addEventListener('click',()=>{if(needPerm)startCompass()}); // iOS cần chạm để cấp quyền
+ needPerm=true;addEventListener('pointerup',()=>{if(needPerm&&!asking)startCompass()}); // iOS: cần chạm để cấp quyền
 }else startCompass();
+setTimeout(()=>{if(hd==null){sensorMsg='Chưa nhận được cảm biến hướng';hudText()}},4000);
 if(navigator.geolocation)navigator.geolocation.watchPosition(onPos,e=>{hudEl.textContent='Chưa có quyền định vị. Hãy cho phép vị trí cho trang này.'},{enableHighAccuracy:true,maximumAge:2000,timeout:20000});
 else hudEl.textContent='Thiết bị không hỗ trợ định vị.';
 </script></body></html>
