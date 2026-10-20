@@ -13,7 +13,7 @@ SHEET_ID = "1P7juPjYYReWhr9zQIyCg2PW_aTASA5dq1UG0DvfJUTk"
 GID = "455030063"  # sheet "Tọa độ"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid={GID}"
 
-st.set_page_config(page_title="Lộ trình tối ưu xe máy", page_icon="🛵", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="TQG_Bill", page_icon="🛵", layout="wide", initial_sidebar_state="expanded")
 
 
 # ---------- Đọc dữ liệu ----------
