@@ -1,0 +1,99 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+html,body,#m{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.leaflet-top{margin-top:48px}
+.pin{width:26px;height:26px;border-radius:50%;background:#ea580c;color:#fff;border:2px solid #fff;display:grid;place-items:center;font:700 12px system-ui;box-shadow:0 1px 5px #0008}
+.me{position:relative;width:96px;height:96px}
+.me .cone{position:absolute;inset:0;border-radius:50%;opacity:0;transition:transform .15s linear;background:conic-gradient(from -32deg at 50% 50%,rgba(59,130,246,.8) 0 64deg,transparent 64deg);-webkit-mask-image:radial-gradient(circle,transparent 9px,#000 13px,transparent 46px);mask-image:radial-gradient(circle,transparent 9px,#000 13px,transparent 46px)}
+.me .pulse{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px;border-radius:50%;background:#3b82f6;animation:pl 1.8s ease-out infinite}
+.me .dot{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 2px #2563eb66,0 0 14px 6px #3b82f6aa}
+@keyframes pl{0%{transform:scale(1);opacity:.75}100%{transform:scale(4.4);opacity:0}}
+.hud{background:#0f2a26e6;color:#fff;padding:8px 12px;border-radius:12px;font:600 12.5px/1.35 system-ui;box-shadow:0 4px 14px #0006;backdrop-filter:blur(4px)}
+.btn{display:block;width:34px;height:34px;line-height:34px;text-align:center;font-size:18px;background:#fff;color:#0f766e;border-radius:8px;box-shadow:0 1px 5px #0006;cursor:pointer;text-decoration:none;margin-top:8px}
+.btn.w{width:auto;padding:0 12px;font:700 13px/34px system-ui}
+</style></head><body><div id="m"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const post=(t,d)=>parent.postMessage({isStreamlitMessage:true,type:t,...d},'*');
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dm=(a,b)=>{const r=Math.PI/180,x=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lng-a.lng)*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
+
+const map=L.map('m');
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map);
+map.setView([16,107.5],6);
+const layer=L.layerGroup().addTo(map);
+let sig='',fitted=false;
+
+// ---- Vẽ lộ trình / điểm đến (màu cam) ----
+function render(a){
+ const s=JSON.stringify([a.pts,a.line]);if(s===sig)return;sig=s;
+ layer.clearLayers();
+ const all=a.line.slice();
+ if(a.line.length){
+  L.polyline(a.line,{color:'#fff',weight:9,opacity:.55}).addTo(layer);
+  L.polyline(a.line,{color:'#f97316',weight:5,opacity:.95}).addTo(layer);
+ }
+ a.pts.forEach(p=>{all.push([p.lat,p.lng]);
+  (p.l===''?L.circleMarker([p.lat,p.lng],{radius:7,color:'#fff',weight:2,fillColor:'#f97316',fillOpacity:1})
+  :L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',iconSize:[26,26],html:'<div class="pin">'+esc(p.l)+'</div>'})})).bindTooltip(esc(p.n)).addTo(layer)});
+ if(all.length>1){map.fitBounds(all,{padding:[60,60]});fitted=true}
+ else if(all.length){map.setView(all[0],16);fitted=true}
+}
+window.addEventListener('message',e=>{if(e.data&&e.data.type==='streamlit:render')render(e.data.args||{pts:[],line:[]})});
+post('streamlit:componentReady',{apiVersion:1});post('streamlit:setFrameHeight',{height:700});
+
+// ---- Giao diện phụ: bảng tọa độ + nút về vị trí ----
+const hud=L.control({position:'bottomleft'});
+hud.onAdd=()=>{const d=L.DomUtil.create('div','hud');d.textContent='Đang chờ định vị…';return d};hud.addTo(map);
+const hudEl=hud.getContainer();
+const bar=L.control({position:'topleft'});
+bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn w" id="cmp" style="display:none">🧭 Bật la bàn</a>';
+ L.DomEvent.disableClickPropagation(d);return d};bar.addTo(map);
+document.getElementById('ctr').onclick=()=>{if(last)map.setView([last.lat,last.lng],Math.max(map.getZoom(),17))};
+
+// ---- Vị trí realtime + hướng (la bàn) ----
+let last=null,pub=null,mk=null,ring=null,cone=null,rot=null,hasCompass=false,hd=null;
+function hudText(){
+ if(!last)return;
+ hudEl.innerHTML='📍 '+last.lat.toFixed(5)+', '+last.lng.toFixed(5)+' · ±'+Math.round(last.acc)+' m'+(hd==null?'':'<br>🧭 '+Math.round(hd)+'°');
+}
+function setHeading(h){
+ rot=rot==null?h:rot+((((h-(rot%360))+540)%360)-180)*0.3;
+ hd=((rot%360)+360)%360;
+ if(cone){cone.style.opacity=1;cone.style.transform='rotate('+rot+'deg)'}
+ hudText();
+}
+function onPos(p){
+ const c=p.coords;last={lat:c.latitude,lng:c.longitude,acc:c.accuracy};
+ if(!mk){
+  mk=L.marker([last.lat,last.lng],{zIndexOffset:2000,interactive:false,icon:L.divIcon({className:'',iconSize:[96,96],html:'<div class="me"><div class="pulse"></div><div class="cone"></div><div class="dot"></div></div>'})}).addTo(map);
+  ring=L.circle([last.lat,last.lng],{radius:last.acc,color:'#3b82f6',weight:1,fillColor:'#3b82f6',fillOpacity:.1,interactive:false}).addTo(map);
+  cone=mk.getElement().querySelector('.cone');
+ }else{mk.setLatLng([last.lat,last.lng]);ring.setLatLng([last.lat,last.lng]).setRadius(last.acc)}
+ if(!hasCompass&&c.heading!=null&&!isNaN(c.heading)&&c.speed>1)setHeading(c.heading);
+ hudText();
+ if(!fitted){map.setView([last.lat,last.lng],16);fitted=true}
+ if(!pub||dm(pub,last)>=20||(pub.acc>100&&last.acc<pub.acc/2)){
+  pub={...last};post('streamlit:setComponentValue',{value:{lat:last.lat,lon:last.lng,acc:last.acc},dataType:'json'});
+ }
+}
+function onOri(e){
+ let h=e.webkitCompassHeading;
+ if(h==null&&e.alpha!=null&&(e.absolute||e.type==='deviceorientationabsolute'))h=360-e.alpha;
+ if(h==null||isNaN(h))return;
+ hasCompass=true;setHeading((h+((screen.orientation&&screen.orientation.angle)||0))%360);
+}
+function startCompass(){
+ const D=window.DeviceOrientationEvent;
+ if(D&&typeof D.requestPermission==='function'){
+  D.requestPermission().then(r=>{if(r==='granted'){addEventListener('deviceorientation',onOri,true);document.getElementById('cmp').style.display='none'}}).catch(()=>{});
+ }else{addEventListener('deviceorientationabsolute',onOri,true);addEventListener('deviceorientation',onOri,true)}
+}
+if(window.DeviceOrientationEvent&&typeof DeviceOrientationEvent.requestPermission==='function'){
+ const b=document.getElementById('cmp');b.style.display='block';b.onclick=startCompass; // iOS cần chạm để cấp quyền
+}else startCompass();
+if(navigator.geolocation)navigator.geolocation.watchPosition(onPos,e=>{hudEl.textContent='Chưa có quyền định vị. Hãy cho phép vị trí cho trang này.'},{enableHighAccuracy:true,maximumAge:2000,timeout:20000});
+else hudEl.textContent='Thiết bị không hỗ trợ định vị.';
+</script></body></html>
