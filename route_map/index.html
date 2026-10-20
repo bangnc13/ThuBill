@@ -5,11 +5,11 @@
 html,body,#m{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .leaflet-top{margin-top:48px}
 .pin{width:26px;height:26px;border-radius:50%;background:#ea580c;color:#fff;border:2px solid #fff;display:grid;place-items:center;font:700 12px system-ui;box-shadow:0 1px 5px #0008}
-.me{position:relative;width:96px;height:96px}
-.me .arw{position:absolute;left:0;top:0;width:96px;height:96px;opacity:.55;transition:transform .15s linear;filter:drop-shadow(0 0 6px #3b82f6)}
-.me .arw.on{opacity:1}
-.me .pulse{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px;border-radius:50%;background:#3b82f6;animation:pl 1.8s ease-out infinite}
-.me .dot{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 2px #2563eb66,0 0 14px 6px #3b82f6aa}
+.me{position:relative;width:120px;height:120px}
+.me .beam{position:absolute;inset:0;border-radius:50%;opacity:0;transition:transform .15s linear,opacity .3s;background:conic-gradient(from -32deg at 50% 50%,rgba(66,133,244,.9) 0 64deg,transparent 64deg);-webkit-mask-image:radial-gradient(circle,transparent 9px,#000 13px,transparent 58px);mask-image:radial-gradient(circle,transparent 9px,#000 13px,transparent 58px)}
+.me .beam.on{opacity:1}
+.me .pulse{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px;border-radius:50%;background:#4285f4;animation:pl 2s ease-out infinite}
+.me .dot{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px;border-radius:50%;background:#4285f4;border:3px solid #fff;box-shadow:0 1px 6px #0006,0 0 12px 4px #4285f488}
 @keyframes pl{0%{transform:scale(1);opacity:.75}100%{transform:scale(4.4);opacity:0}}
 .hud{background:#0f2a26e6;color:#fff;padding:8px 12px;border-radius:12px;font:600 12.5px/1.35 system-ui;box-shadow:0 4px 14px #0006;backdrop-filter:blur(4px)}
 .btn{display:block;width:34px;height:34px;line-height:34px;text-align:center;font-size:18px;background:#fff;color:#0f766e;border-radius:8px;box-shadow:0 1px 5px #0006;cursor:pointer;text-decoration:none;margin-top:8px}
@@ -22,7 +22,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const dm=(a,b)=>{const r=Math.PI/180,x=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lng-a.lng)*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
 
 const map=L.map('m',{zoomControl:false});
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:21,maxNativeZoom:18,attribution:'Tiles © Esri'}).addTo(map);
 map.setView([16,107.5],6);
 const layer=L.layerGroup().addTo(map);
 let sig='',fitted=false;
@@ -69,9 +69,9 @@ function setHeading(h){
 function onPos(p){
  const c=p.coords;last={lat:c.latitude,lng:c.longitude,acc:c.accuracy};
  if(!mk){
-  mk=L.marker([last.lat,last.lng],{zIndexOffset:2000,interactive:false,icon:L.divIcon({className:'',iconSize:[96,96],html:'<div class="me"><div class="pulse"></div><div class="dot"></div><svg class="arw" viewBox="0 0 96 96"><path d="M48 5 L61 35 L48 29 L35 35 Z" fill="#fff" stroke="#2563eb" stroke-width="3" stroke-linejoin="round"/></svg></div>'})}).addTo(map);
+  mk=L.marker([last.lat,last.lng],{zIndexOffset:2000,interactive:false,icon:L.divIcon({className:'',iconSize:[120,120],html:'<div class="me"><div class="beam"></div><div class="pulse"></div><div class="dot"></div></div>'})}).addTo(map);
   ring=L.circle([last.lat,last.lng],{radius:last.acc,color:'#3b82f6',weight:1,fillColor:'#3b82f6',fillOpacity:.1,interactive:false}).addTo(map);
-  cone=mk.getElement().querySelector('.arw');
+  cone=mk.getElement().querySelector('.beam');
  }else{mk.setLatLng([last.lat,last.lng]);ring.setLatLng([last.lat,last.lng]).setRadius(last.acc)}
  if(!hasCompass&&c.heading!=null&&!isNaN(c.heading)&&c.speed>1)setHeading(c.heading);
  hudText();
