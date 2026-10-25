@@ -1,4 +1,4 @@
-# TQG_Bill (Streamlit)
+# Lộ trình tối ưu cho xe máy (Streamlit)
 
 Chọn hoặc import danh sách đối tượng (sheet "Tọa độ"), lấy vị trí điện thoại làm điểm xuất phát,
 tính thứ tự tối ưu và vẽ lộ trình theo đường bộ thật.
@@ -23,3 +23,11 @@ Cần bật Routes API cho khóa. Có khóa thì app dùng chế độ xe máy (
 ## Chạy thử trên máy
     pip install -r requirements.txt
     streamlit run app.py
+
+## Ảnh vệ tinh Google (tùy chọn)
+Bật **Map Tiles API** trong Google Cloud, tạo khóa riêng, giới hạn khóa theo API (chỉ Map Tiles API) và theo tên miền app,
+rồi thêm vào Secrets:
+
+    GOOGLE_TILES_API_KEY = "khóa-ảnh-vệ-tinh"
+
+Không có khóa (hoặc Google báo lỗi) thì bản đồ dùng ảnh vệ tinh Esri. Khóa này được gửi xuống trình duyệt nên phải giới hạn.

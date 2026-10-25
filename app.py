@@ -13,7 +13,7 @@ SHEET_ID = "1P7juPjYYReWhr9zQIyCg2PW_aTASA5dq1UG0DvfJUTk"
 GID = "455030063"  # sheet "Tọa độ"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid={GID}"
 
-st.set_page_config(page_title="TQG_Bill", page_icon="🛵", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Lộ trình tối ưu xe máy", page_icon="🛵", layout="wide", initial_sidebar_state="expanded")
 
 
 # ---------- Đọc dữ liệu ----------
@@ -110,6 +110,10 @@ try:
     GKEY = st.secrets.get("GOOGLE_MAPS_API_KEY")
 except Exception:
     GKEY = None
+try:  # khóa riêng cho ảnh vệ tinh Google (nên giới hạn theo tên miền); mặc định dùng chung khóa trên
+    TILE_KEY = st.secrets.get("GOOGLE_TILES_API_KEY") or GKEY
+except Exception:
+    TILE_KEY = GKEY
 
 # ---------- Giao diện ----------
 CSS = """<style>
@@ -232,4 +236,4 @@ if R:
 else:  # chưa tính: hiện các điểm đã chọn
     pts = [dict(lat=c[1], lng=c[2], n=c[0], l="") for c in picked]
     path = []
-MAP(pts=pts, line=path, key="map", default=None)
+MAP(pts=pts, line=path, tkey=TILE_KEY, key="map", default=None)
