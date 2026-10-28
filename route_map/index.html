@@ -14,7 +14,7 @@ html,body,#m{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI"
 .me .dot{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px;border-radius:50%;background:#4285f4;border:3px solid #fff;box-shadow:0 1px 6px #0006,0 0 12px 4px #4285f488}
 @keyframes pl{0%{transform:scale(1);opacity:.75}100%{transform:scale(4.4);opacity:0}}
 .hud{background:#0f2a26e6;color:#fff;padding:8px 12px;border-radius:12px;font:600 12.5px/1.35 system-ui;box-shadow:0 4px 14px #0006;backdrop-filter:blur(4px)}
-.btn{display:block;width:34px;height:34px;line-height:34px;text-align:center;font-size:18px;background:#fff;color:#0f766e;border-radius:8px;box-shadow:0 1px 5px #0006;cursor:pointer;text-decoration:none;margin-top:8px}
+.btn{display:block;width:34px;height:34px;line-height:34px;text-align:center;font-size:18px;background:#fff;color:#0f766e;border-radius:8px;box-shadow:0 1px 5px #0006;cursor:pointer;text-decoration:none;margin-top:8px;user-select:none}
 #rst{position:relative}
 #rst .nd{position:absolute;left:50%;top:50%;width:0;height:0;margin:-15px 0 0 -6px;transform-origin:6px 15px;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:15px solid #ef4444}
 #rst .nd::after{content:"";position:absolute;left:-6px;top:15px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:15px solid #94a3b8}
@@ -29,20 +29,40 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&','<':'<','>':'>','"':'"'}[c
 const dm=(a,b)=>{const r=Math.PI/180,x=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lng-a.lng)*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
 
 const map=L.map('m',{zoomControl:false,rotate:true,bearing:0,touchRotate:true,shiftKeyRotate:true,rotateControl:false});
-const esri=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:22,maxNativeZoom:18,attribution:'Tiles © Esri'}).addTo(map);
-let tileMsg='',gSet=false;
-async function useGoogle(key){ // Google Map Tiles API: vệ tinh, cần khóa API
+
+// ---- Khởi tạo các Layer bản đồ (Mặc định: Đường phố) ----
+const streetLayer = L.tileLayer('https://{s}.google.com/vt/lyrs=m&hl=vi&gl=VN&x={x}&y={y}&z={z}',{
+ maxZoom:22, maxNativeZoom:20, subdomains:['mt0','mt1','mt2','mt3'], attribution:'Map data © Google'
+}).addTo(map); // Đặt layer đường phố làm mặc định
+
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+ maxZoom:22, maxNativeZoom:18, attribution:'Tiles © Esri'
+});
+
+let satLayer = esriSat;
+let isSat = false; // false = Đường phố (mặc định), true = Vệ tinh
+let tileMsg='', gSet=false;
+
+async function useGoogle(key){ // Google Map Tiles API: vệ tinh chính thức nếu có khóa API
  if(gSet||!key)return;gSet=true;
  try{
   const r=await fetch('https://tile.googleapis.com/v1/createSession?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mapType:'satellite',language:'vi-VN',region:'VN'})});
   const j=await r.json();if(!j.session)throw new Error((j.error&&j.error.message)||r.status);
   const g=L.tileLayer('https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session='+j.session+'&key='+encodeURIComponent(key),{maxZoom:22,maxNativeZoom:20,attribution:'Map data © Google'});
   let n=0;
-  g.once('load',()=>map.removeLayer(esri));
-  g.on('tileerror',()=>{if(++n==4){map.removeLayer(g);if(!map.hasLayer(esri))esri.addTo(map);tileMsg='Ảnh Google lỗi, đang dùng ảnh Esri';hudText()}});
-  g.addTo(map);
+  g.on('tileerror',()=>{
+   if(++n==4){
+    if(map.hasLayer(g))map.removeLayer(g);
+    satLayer=esriSat;
+    if(isSat&&!map.hasLayer(esriSat))esriSat.addTo(map);
+    tileMsg='Ảnh Google lỗi, đang dùng ảnh Esri';hudText();
+   }
+  });
+  satLayer=g;
+  if(isSat){if(map.hasLayer(esriSat))map.removeLayer(esriSat);g.addTo(map)}
  }catch(e){tileMsg='Chưa dùng được ảnh Google: '+e.message;if(typeof last!=='undefined'&&last)hudText();else hudEl.textContent=tileMsg}
 }
+
 map.setView([16,107.5],6);
 const layer=L.layerGroup().addTo(map);
 let sig='',fitted=false;
@@ -79,13 +99,37 @@ function render(a){
 window.addEventListener('message',e=>{if(e.data&&e.data.type==='streamlit:render')render(e.data.args||{pts:[],line:[]})});
 post('streamlit:componentReady',{apiVersion:1});post('streamlit:setFrameHeight',{height:700});
 
-// ---- Giao diện phụ: bảng tọa độ + nút về vị trí ----
+// ---- Giao diện phụ: bảng tọa độ + nút đổi Layer + nút về vị trí ----
 const hud=L.control({position:'bottomright'});
 hud.onAdd=()=>{const d=L.DomUtil.create('div','hud');d.textContent='Đang chờ định vị…';return d};hud.addTo(map);
 const hudEl=hud.getContainer();
 const bar=L.control({position:'topright'});
-bar.onAdd=()=>{const d=L.DomUtil.create('div');d.innerHTML='<a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn" id="rst" title="Về hướng Bắc" style="display:none"><i class="nd"></i></a>';
- L.DomEvent.disableClickPropagation(d);return d};bar.addTo(map);
+bar.onAdd=()=>{
+ const d=L.DomUtil.create('div');
+ d.innerHTML='<a class="btn" id="lyr" title="Đổi nền Vệ tinh / Đường phố">🛰️</a><a class="btn" id="ctr" title="Về vị trí của tôi">◎</a><a class="btn" id="rst" title="Về hướng Bắc" style="display:none"><i class="nd"></i></a>';
+ L.DomEvent.disableClickPropagation(d);
+ return d;
+};
+bar.addTo(map);
+
+// Xử lý nút chuyển đổi Đường phố <-> Vệ tinh
+const lyrBtn=document.getElementById('lyr');
+lyrBtn.onclick=()=>{
+ isSat=!isSat;
+ if(isSat){
+  if(map.hasLayer(streetLayer))map.removeLayer(streetLayer);
+  satLayer.addTo(map);
+  lyrBtn.textContent='🗺️';
+  lyrBtn.title='Chuyển sang bản đồ Đường phố';
+ }else{
+  if(map.hasLayer(satLayer))map.removeLayer(satLayer);
+  if(map.hasLayer(esriSat))map.removeLayer(esriSat);
+  streetLayer.addTo(map);
+  lyrBtn.textContent='🛰️';
+  lyrBtn.title='Chuyển sang bản đồ Vệ tinh';
+ }
+};
+
 const rst=document.getElementById('rst'),nd=rst.querySelector('.nd');
 if(map.setBearing){
  map.on('rotate',()=>{const b=map.getBearing();rst.style.display=Math.abs(((b+180)%360)-180)>1?'block':'none';nd.style.transform='rotate('+(-b)+'deg)';applyBeam()});
