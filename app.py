@@ -180,9 +180,6 @@ with st.sidebar:
     picked = [BYNAME[n] for n in st.session_state.get("sel", []) if n in BYNAME]
     st.markdown(f'<span class="pill">Đã chọn {len(picked)} điểm</span>', unsafe_allow_html=True)
 
-    # Tùy chọn bật/tắt hiển thị tên tập điểm trực tiếp trên bản đồ
-    show_name = st.toggle("🏷️ Hiển thị tên tập điểm trên map", value=True)
-
     # Vị trí hiện tại (realtime từ bản đồ) dùng làm điểm xuất phát, không hiển thị trên menu
     loc = st.session_state.get("map")
     start = (loc["lat"], loc["lon"]) if isinstance(loc, dict) and "lat" in loc else None
@@ -233,27 +230,10 @@ with st.sidebar:
 # ---------- Bản đồ vệ tinh toàn màn hình ----------
 if R:
     off = 1 if R["fb"] else 0
-    pts = [
-        dict(
-            lat=R["P"][i][0],
-            lng=R["P"][i][1],
-            n=R["N"][i],
-            l=f"{k + off}. {R['N'][i]}" if show_name else str(k + off),
-        )
-        for k, i in enumerate(R["order"])
-        if R["fb"] or k > 0
-    ]
+    pts = [dict(lat=R["P"][i][0], lng=R["P"][i][1], n=R["N"][i], l=str(k + off))
+           for k, i in enumerate(R["order"]) if R["fb"] or k > 0]
     path = [list(p) for p in R["line"]]
 else:  # chưa tính: hiện các điểm đã chọn
-    pts = [
-        dict(
-            lat=c[1],
-            lng=c[2],
-            n=c[0],
-            l=c[0] if show_name else "",
-        )
-        for c in picked
-    ]
+    pts = [dict(lat=c[1], lng=c[2], n=c[0], l="") for c in picked]
     path = []
-
-MAP(pts=pts, line=path, tkey=TILE_KEY, key="map", default=None, show_name=show_name)
+MAP(pts=pts, line=path, tkey=TILE_KEY, key="map", default=None)
